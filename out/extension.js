@@ -38,6 +38,7 @@ exports.deactivate = deactivate;
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 const vscode = __importStar(require("vscode"));
+const llm_1 = require("./llm");
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 function activate(context) {
@@ -53,7 +54,80 @@ function activate(context) {
         vscode.window.showInformationMessage('CodeTogether is running!');
         ;
     });
-    context.subscriptions.push(disposable);
+    // Connect this command to the action below.
+    const explain = vscode.commands.registerCommand('codetogether.explainChanges', async () => {
+        // Ask the developer a question and wait for their answer.
+        const answer = await vscode.window.showInputBox({
+            title: 'CodeTogether',
+            prompt: 'What did you change, and how does it work?',
+            placeHolder: 'Explain your changes in your own words...'
+        });
+        // Stop if they cancel or leave the answer empty.
+        if (!answer?.trim()) {
+            return;
+        }
+        // For now, just display their answer.
+        vscode.window.showInformationMessage(`Your explanation: ${answer}`);
+    });
+    const chooseModelCommand = vscode.commands.registerCommand('codetogether.chooseModel', async () => {
+        const config = vscode.workspace.getConfiguration('codetogether');
+        const model = await vscode.window.showInputBox({
+            title: 'Choose your Ollama model',
+            prompt: 'Enter a model name from ollama list',
+            placeHolder: 'For example: qwen3:4b',
+            value: config.get('model') ?? ''
+        });
+        // Stop if the user cancels or enters nothing.
+        if (!model?.trim()) {
+            return;
+        }
+        // Save the choice in the user's settings.
+        await config.update('model', model.trim(), vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage(`CodeTogether will use ${model.trim()}`);
+    });
+    const reviewCommand = vscode.commands.registerCommand('codetogether.openReview', async () => {
+        const panel = vscode.window.createWebviewPanel('codetogetherReview', 'CodeTogether Review', vscode.ViewColumn.One, { enableScripts: true });
+        // Find UI/review.html inside your extension.
+        const htmlPath = vscode.Uri.joinPath(context.extensionUri, 'UI', 'review.html');
+        // Listen for the Submit button in your HTML.
+        panel.webview.onDidReceiveMessage(async (message) => {
+            if (message?.type !== 'submitExplanation' ||
+                typeof message.answer !== 'string') {
+                return;
+            }
+            const answer = message.answer.trim();
+            if (!answer) {
+                panel.webview.postMessage({
+                    type: 'feedback',
+                    text: 'Please enter an explanation first.'
+                });
+                return;
+            }
+            panel.webview.postMessage({
+                type: 'feedback',
+                text: 'Thinking...'
+            });
+            try {
+                const feedback = await (0, llm_1.askModel)(answer);
+                panel.webview.postMessage({
+                    type: 'feedback',
+                    text: feedback
+                });
+            }
+            catch (error) {
+                panel.webview.postMessage({
+                    type: 'feedback',
+                    text: error instanceof Error
+                        ? error.message
+                        : 'Could not connect to Ollama.'
+                });
+            }
+        }, undefined, context.subscriptions);
+        // Read the HTML file and display it.
+        const htmlBytes = await vscode.workspace.fs.readFile(htmlPath);
+        panel.webview.html = new TextDecoder().decode(htmlBytes);
+    });
+    context.subscriptions.push(disposable, explain, reviewCommand, chooseModelCommand);
 }
 // This method is called when your extension is deactivated
 function deactivate() { }

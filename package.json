@@ -12,11 +12,40 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
-    "commands": [
+
+    "configuration": {
+  "title": "CodeTogether",
+  "properties": {
+    "codetogether.model": {
+      "type": "string",
+      "default": "",
+      "description": "Ollama model name. Use an exact name from ollama list."
+    }
+  }
+},
+
+    "commands": [ 
+      
       {
         "command": "codetogether.helloWorld",
         "title": "Hello World"
-      }
+      }, 
+      
+      {
+      "command": "codetogether.explainChanges",
+      "title": "CodeTogether: Explain My Changes"
+    },
+
+    {
+      "command": "codetogether.openReview",
+      "title": "CodeTogether: Open Review"
+    },
+
+    {
+      "command": "codetogether.chooseModel",
+      "title": "CodeTogether: Choose Model"
+    }
+
     ]
   },
   "scripts": {

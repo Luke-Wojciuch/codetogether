@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+			<html lang="en">
+			<head>
+				<meta charset="UTF-8">
+				<meta name="viewport"
+					content="width=device-width, initial-scale=1.0">
+
+				<title>CodeTogether Review</title>
+
+				<style>
+					body {
+						font-family: var(--vscode-font-family);
+						color: var(--vscode-editor-foreground);
+						background: var(--vscode-editor-background);
+						padding: 24px;
+						max-width: 700px;
+					}
+
+					textarea {
+						box-sizing: border-box;
+						width: 100%;
+						min-height: 140px;
+						margin: 12px 0;
+						padding: 12px;
+						color: var(--vscode-input-foreground);
+						background: var(--vscode-input-background);
+						border: 1px solid var(--vscode-input-border, #888);
+					}
+
+					button {
+						padding: 10px 16px;
+						color: var(--vscode-button-foreground);
+						background: var(--vscode-button-background);
+						border: none;
+						cursor: pointer;
+					}
+				</style>
+			</head>
+
+			<body>
+				<h1>CodeTogether</h1>
+
+				<label for="explanation">
+					What did you change, and how does it work?
+				</label>
+
+				<textarea
+					id="explanation"
+					placeholder="Explain your changes in your own words..."
+				></textarea>
+
+				<button id="submit">Submit explanation</button>
+
+				<p id="feedback" role="status"></p>
+
+				<script>
+					// Connect this webpage to the extension.
+					const vscode = acquireVsCodeApi();
+
+					document.getElementById('submit')
+						.addEventListener('click', () => {
+							const answer = document
+								.getElementById('explanation').value;
+
+							vscode.postMessage({
+								type: 'submitExplanation',
+								answer: answer
+							});
+						});
+
+					// Receive feedback from the extension.
+					window.addEventListener('message', (event) => {
+						const message = event.data;
+
+						if (message.type === 'feedback') {
+							document.getElementById('feedback')
+								.textContent = message.text;
+						}
+					});
+				</script>
+			</body>
+			</html>
