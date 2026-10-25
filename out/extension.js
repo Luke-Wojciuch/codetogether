@@ -39,6 +39,7 @@ exports.deactivate = deactivate;
 // Import the module and reference it with the alias vscode in your code below
 const vscode = __importStar(require("vscode"));
 const llm_1 = require("./llm");
+const git_1 = require("./git");
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 function activate(context) {
@@ -91,35 +92,57 @@ function activate(context) {
         const htmlPath = vscode.Uri.joinPath(context.extensionUri, 'UI', 'review.html');
         // Listen for the Submit button in your HTML.
         panel.webview.onDidReceiveMessage(async (message) => {
+            // Load the staged filenames and line counts.
+            if (message?.type === 'loadFiles') {
+                try {
+                    const files = await (0, git_1.getChangedFiles)();
+                    await panel.webview.postMessage({
+                        type: 'changedFiles',
+                        files
+                    });
+                }
+                catch (error) {
+                    await panel.webview.postMessage({
+                        type: 'feedback',
+                        text: error instanceof Error
+                            ? error.message
+                            : 'Could not load changed files.'
+                    });
+                }
+                return;
+            }
+            // Ignore messages that are not explanation submissions.
             if (message?.type !== 'submitExplanation' ||
                 typeof message.answer !== 'string') {
                 return;
             }
             const answer = message.answer.trim();
             if (!answer) {
-                panel.webview.postMessage({
+                await panel.webview.postMessage({
                     type: 'feedback',
                     text: 'Please enter an explanation first.'
                 });
                 return;
             }
-            panel.webview.postMessage({
+            await panel.webview.postMessage({
                 type: 'feedback',
                 text: 'Thinking...'
             });
+            // Read the staged diff and ask Ollama for feedback.
             try {
-                const feedback = await (0, llm_1.askModel)(answer);
-                panel.webview.postMessage({
+                const diff = await (0, git_1.getStagedDiff)();
+                const feedback = await (0, llm_1.askModel)(answer, diff);
+                await panel.webview.postMessage({
                     type: 'feedback',
                     text: feedback
                 });
             }
             catch (error) {
-                panel.webview.postMessage({
+                await panel.webview.postMessage({
                     type: 'feedback',
                     text: error instanceof Error
                         ? error.message
-                        : 'Could not connect to Ollama.'
+                        : 'Could not review the changes. Check Git and Ollama.'
                 });
             }
         }, undefined, context.subscriptions);

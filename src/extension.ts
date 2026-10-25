@@ -2,6 +2,9 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import { askModel } from './llm';
+import { getStagedDiff, getChangedFiles } from './git';
+
+
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -94,6 +97,28 @@ export function activate(context: vscode.ExtensionContext) {
 		// Listen for the Submit button in your HTML.
 		panel.webview.onDidReceiveMessage(
 	async (message) => {
+		// Load the staged filenames and line counts.
+		if (message?.type === 'loadFiles') {
+			try {
+				const files = await getChangedFiles();
+
+				await panel.webview.postMessage({
+					type: 'changedFiles',
+					files
+				});
+			} catch (error) {
+				await panel.webview.postMessage({
+					type: 'feedback',
+					text: error instanceof Error
+						? error.message
+						: 'Could not load changed files.'
+				});
+			}
+
+			return;
+		}
+
+		// Ignore messages that are not explanation submissions.
 		if (
 			message?.type !== 'submitExplanation' ||
 			typeof message.answer !== 'string'
@@ -104,31 +129,33 @@ export function activate(context: vscode.ExtensionContext) {
 		const answer = message.answer.trim();
 
 		if (!answer) {
-			panel.webview.postMessage({
+			await panel.webview.postMessage({
 				type: 'feedback',
 				text: 'Please enter an explanation first.'
 			});
 			return;
 		}
 
-		panel.webview.postMessage({
+		await panel.webview.postMessage({
 			type: 'feedback',
 			text: 'Thinking...'
 		});
 
+		// Read the staged diff and ask Ollama for feedback.
 		try {
-			const feedback = await askModel(answer);
+			const diff = await getStagedDiff();
+			const feedback = await askModel(answer, diff);
 
-			panel.webview.postMessage({
+			await panel.webview.postMessage({
 				type: 'feedback',
 				text: feedback
 			});
 		} catch (error) {
-			panel.webview.postMessage({
+			await panel.webview.postMessage({
 				type: 'feedback',
 				text: error instanceof Error
 					? error.message
-					: 'Could not connect to Ollama.'
+					: 'Could not review the changes. Check Git and Ollama.'
 			});
 		}
 	},
