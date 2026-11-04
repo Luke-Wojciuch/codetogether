@@ -1,0 +1,432 @@
+const vscode = acquireVsCodeApi();
+const byId = id => document.getElementById(id);
+const input = byId('input');
+const goalInput = byId('goal-input');
+const topics = { purpose: 'Purpose', behavior: 'Behavior', effect: 'Effect', edge: 'Edge cases' };
+const statuses = { unexplored: 'Not explored', discussed: 'Discussed', demonstrated: 'Shown in your words' };
+let context;
+let busy = false;
+let goal = '';
+let hasDiscussion = false;
+let view = 'goal';
+let failed = false;
+let lastTurn;
+let draftMessage;
+let partialReply;
+let partialText;
+let previewReference;
+let assessment;
+let recapText = '';
+let finished = false;
+
+function setView(next) {
+	view = next;
+	for (const name of ['goal', 'discussion', 'recap']) {
+		byId(name + '-view').hidden = name !== next;
+		if (name === next) byId('nav-' + name).setAttribute('aria-current', 'step');
+		else byId('nav-' + name).removeAttribute('aria-current');
+	}
+	byId('preview').hidden = true;
+	if (!failed) byId('status').textContent = '';
+	if (next === 'goal') goalInput.focus();
+	if (next === 'discussion') input.focus();
+	if (next === 'recap') {
+		byId('recap-title').setAttribute('tabindex', '-1');
+		byId('recap-title').focus();
+	}
+}
+function setBusy(value) {
+	busy = value;
+	for (const id of ['begin', 'send', 'restart', 'edit-goal', 'ask-code', 'keep-studying', 'finish']) byId(id).disabled = value || !context;
+	byId('nav-goal').disabled = value;
+	byId('nav-discussion').disabled = value || !hasDiscussion;
+	byId('nav-recap').disabled = value || !hasDiscussion;
+	byId('recap').disabled = value || !hasDiscussion;
+	byId('finish').disabled = value || !context || finished;
+	for (const button of document.querySelectorAll('[data-goal], [data-question]')) button.disabled = value || !context;
+	input.disabled = value;
+	goalInput.disabled = value;
+	byId('cancel').hidden = !value;
+	byId('retry').hidden = true;
+	byId('status').textContent = value ? (context ? 'Thinking through your code…' : 'Loading staged code…') : '';
+}
+function appendText(entry, text) {
+	let position = 0;
+	for (const match of text.matchAll(/\[\[(\d+):(\d+)(?:-(\d+))?\]\]/g)) {
+		entry.append(document.createTextNode(text.slice(position, match.index)));
+		const sourceId = Number(match[1]);
+		const line = Number(match[2]);
+		const endLine = Number(match[3] ?? match[2]);
+		const source = context?.sources[sourceId - 1];
+		const start = source?.startLine ?? 1;
+		if (source && line >= start && endLine >= line && endLine < start + source.content.split('\n').length) {
+			const link = document.createElement('button');
+			link.className = 'reference';
+			link.type = 'button';
+			link.textContent = source.name + ':' + line + (endLine === line ? '' : '-' + endLine) + ' · Show code';
+			link.addEventListener('click', () => showCode(sourceId, line, endLine));
+			entry.append(link);
+		} else entry.append(document.createTextNode('[unavailable code reference]'));
+		position = match.index + match[0].length;
+	}
+	entry.append(document.createTextNode(text.slice(position)));
+}
+function addMessage(who, text) {
+	const entry = document.createElement('div');
+	entry.className = who === 'You' || who === 'Your goal' ? 'message user' : 'message';
+	const label = document.createElement('strong');
+	label.textContent = who;
+	entry.append(label);
+	appendText(entry, text);
+	byId('thread').append(entry);
+	entry.scrollIntoView({ block: 'nearest' });
+	return entry;
+}
+function renderAssessment() {
+	byId('concept-nav').replaceChildren();
+	byId('concepts').replaceChildren();
+	const concepts = assessment?.concepts ?? Object.keys(topics).map(id => ({ id, status: 'unexplored' }));
+	for (const concept of concepts) {
+		const topic = document.createElement('div');
+		topic.className = 'concept-topic ' + concept.status;
+		topic.textContent = topics[concept.id];
+		topic.title = assessment ? statuses[concept.status] : 'Not assessed';
+		byId('concept-nav').append(topic);
+		const row = document.createElement('div');
+		row.className = 'concept-row';
+		const heading = document.createElement('div');
+		heading.className = 'concept-heading';
+		const label = document.createElement('span');
+		label.textContent = topics[concept.id];
+		const status = document.createElement('span');
+		status.className = 'concept-status ' + concept.status;
+		status.textContent = assessment ? statuses[concept.status] : 'Not assessed';
+		heading.append(label, status);
+		row.append(heading);
+		const note = document.createElement('p');
+		note.className = 'concept-evidence';
+		note.textContent = concept.quote ? '“' + concept.quote + '”' : assessment ? (concept.status === 'discussed' ? 'Explored together; not yet demonstrated in your answers.' : 'Still open to explore if relevant to your goal.') : 'The model has not supplied a usable assessment.';
+		row.append(note);
+		byId('concepts').append(row);
+	}
+	const shown = concepts.filter(concept => concept.status === 'demonstrated').length;
+	byId('brain-fill').setAttribute('y', String(112 - shown * 28));
+	byId('brain-fill').setAttribute('height', String(shown * 28));
+	const description = assessment ? (shown ? 'Your answers support ' + shown + ' discussion ' + (shown === 1 ? 'topic' : 'topics') + '. See the evidence below.' : 'We have explored ideas, but your answers have not yet demonstrated them.') : 'No usable assessment yet. You can still finish or keep exploring.';
+	byId('brain-description').textContent = description;
+	byId('progress-description').textContent = description + ' The brain reflects a model assessment, not a score.';
+	const quotes = concepts.filter(concept => concept.quote).map(concept => concept.quote);
+	byId('quote-section').hidden = !quotes.length;
+	byId('evidence-quote').textContent = quotes.length ? '“' + quotes[quotes.length - 1] + '”' : '';
+	byId('uncertainties').replaceChildren();
+	const uncertainties = assessment?.uncertainties.length ? assessment.uncertainties : ['Other files, callers, and runtime behavior have not been checked.'];
+	for (const text of uncertainties) {
+		const item = document.createElement('li');
+		item.textContent = text;
+		byId('uncertainties').append(item);
+	}
+}
+function showCode(sourceId, line, endLine = line, all = false) {
+	const source = context?.sources[sourceId - 1];
+	if (!source) return;
+	const lines = source.content.split('\n');
+	const start = source.startLine ?? 1;
+	if (!Number.isInteger(line) || !Number.isInteger(endLine) || line < start || endLine < line || endLine >= start + lines.length) return;
+	previewReference = { sourceId, line, endLine };
+	byId('preview-title').textContent = source.name + ':' + line + (endLine === line ? '' : '-' + endLine);
+	byId('preview-selection').textContent = 'Lines ' + line + '-' + endLine + ' selected. Drag over code to change the selection.';
+	const code = byId('code-preview');
+	if (view === 'discussion') byId('discussion-view').insertBefore(byId('preview'), byId('thread'));
+	else byId(view + '-view').append(byId('preview'));
+	code.replaceChildren();
+	for (let n = all ? start : Math.max(start, line - 8); n <= (all ? start + lines.length - 1 : Math.min(start + lines.length - 1, endLine + 8)); n++) {
+		const row = document.createElement('span');
+		row.dataset.line = String(n);
+		row.className = n >= line && n <= endLine ? 'code-line highlight' : 'code-line';
+		const number = document.createElement('span');
+		number.className = 'line-number';
+		number.textContent = String(n);
+		const text = document.createElement('span');
+		text.textContent = lines[n - start];
+		row.append(number, text);
+		code.append(row);
+	}
+	byId('preview').hidden = false;
+	byId('preview').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+	code.scrollTop = 0;
+	code.focus({ preventScroll: true });
+	byId('show-all-code').hidden = all;
+}
+function selectPreviewCode() {
+	const code = byId('code-preview');
+	const selection = window.getSelection();
+	if (!previewReference || !selection || selection.isCollapsed || !selection.rangeCount) return;
+	const range = selection.getRangeAt(0);
+	if (!code.contains(range.startContainer) || !code.contains(range.endContainer)) return;
+	function rowAt(node, offset, end) {
+		if (node === code) return code.children[end ? offset - 1 : offset];
+		const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+		return element.closest('.code-line');
+	}
+	const first = rowAt(range.startContainer, range.startOffset, false);
+	let last = rowAt(range.endContainer, range.endOffset, true);
+	// Ending at the very start of the next line does not select that line.
+	if (last && last !== first && range.endContainer !== code && range.endOffset === 0) last = last.previousElementSibling;
+	if (!first || !last) return;
+	const line = Number(first.dataset.line);
+	const endLine = Number(last.dataset.line);
+	if (!Number.isInteger(line) || !Number.isInteger(endLine) || endLine < line) return;
+	previewReference = { ...previewReference, line, endLine };
+	byId('preview-title').textContent = context.sources[previewReference.sourceId - 1].name + ':' + line + (endLine === line ? '' : '-' + endLine);
+	for (const row of code.children) {
+		const n = Number(row.dataset.line);
+		row.classList.toggle('highlight', n >= line && n <= endLine);
+	}
+	byId('preview-selection').textContent = 'Lines ' + line + '-' + endLine + ' selected. Ask about this code or open it in the editor.';
+}
+function renderFiles() {
+	const changes = context.changes;
+	const files = changes ?? context.sources.map(source => ({ name: source.name }));
+	byId('review-kind').textContent = changes ? 'Staged review' : 'Selected code';
+	byId('snapshot-kind').textContent = changes ? 'Staged snapshot' : 'Editor snapshot';
+	const total = files.length + (files.length === 1 ? ' file' : ' files');
+	byId('totals').textContent = changes ? total + ' · +' + changes.reduce((sum, file) => sum + (file.added ?? 0), 0) + ' / −' + changes.reduce((sum, file) => sum + (file.deleted ?? 0), 0) + ' lines' + (changes.some(file => file.added === null) ? ' · binary files excluded from counts' : '') : total;
+	byId('sources').replaceChildren();
+	for (const file of files) {
+		const row = document.createElement('div');
+		row.className = 'file-row';
+		const name = document.createElement('span');
+		name.className = 'file-name';
+		name.textContent = file.name;
+		row.append(name);
+		if (changes) {
+			const counts = document.createElement('span');
+			counts.className = 'counts';
+			if (file.added === null) {
+				counts.textContent = 'Binary';
+			} else {
+				const added = document.createElement('span');
+				added.className = 'added';
+				added.textContent = '+' + file.added;
+				const deleted = document.createElement('span');
+				deleted.className = 'deleted';
+				deleted.textContent = '−' + file.deleted;
+				counts.append(added, document.createTextNode(' / '), deleted);
+				counts.setAttribute('aria-label', file.added + ' lines added, ' + file.deleted + ' lines deleted');
+			}
+			row.append(counts);
+			if (file.added !== null && file.added + file.deleted > 0) {
+				const bar = document.createElement('span');
+				bar.className = 'file-bar';
+				bar.setAttribute('aria-hidden', 'true');
+				for (const count of [file.added, file.deleted]) {
+					const segment = document.createElement('span');
+					segment.style.flex = String(count);
+					bar.append(segment);
+				}
+				row.append(bar);
+			}
+		}
+		const index = context.sources.findIndex(source => source.name === file.name);
+		if (index >= 0) {
+			const button = document.createElement('button');
+			button.className = 'secondary';
+			button.type = 'button';
+			button.textContent = 'Show code';
+			button.setAttribute('aria-label', 'Show code for ' + file.name);
+			button.addEventListener('click', () => {
+				const source = context.sources[index];
+				const start = source.startLine ?? 1;
+				showCode(index + 1, start, start + source.content.split('\n').length - 1);
+			});
+			row.append(button);
+		} else {
+			const note = document.createElement('span');
+			note.className = 'muted';
+			note.textContent = 'Diff only';
+			row.append(note);
+		}
+		byId('sources').append(row);
+	}
+}
+
+function start() {
+	context = undefined;
+	goal = '';
+	hasDiscussion = false;
+	failed = false;
+	lastTurn = undefined;
+	draftMessage = undefined;
+	partialReply = undefined;
+	previewReference = undefined;
+	assessment = undefined;
+	recapText = '';
+	finished = false;
+	input.value = '';
+	goalInput.value = '';
+	byId('thread').replaceChildren();
+	byId('sources').replaceChildren();
+	byId('totals').textContent = 'Loading files…';
+	byId('scope').textContent = 'Loading…';
+	byId('diff').hidden = true;
+	byId('diff').textContent = '';
+	byId('recap-body').replaceChildren();
+	byId('finished-note').hidden = true;
+	byId('finish').textContent = 'Finish review';
+	byId('recap-title').textContent = 'Make sense of what you learned.';
+	renderAssessment();
+	setView('goal');
+	setBusy(true);
+	vscode.postMessage({ type: 'init' });
+}
+function send(text, kind = 'discussion') {
+	if (busy || !context || !text.trim()) return;
+	lastTurn = { text: text.trim(), kind };
+	failed = false;
+	finished = false;
+	byId('finished-note').hidden = true;
+	byId('finish').textContent = 'Finish review';
+	setView('discussion');
+	byId('current-goal').textContent = kind === 'goal' ? text : goal;
+	draftMessage = kind === 'recap' ? undefined : addMessage(kind === 'goal' ? 'Your goal' : 'You', text);
+	setBusy(true);
+	vscode.postMessage({ type: 'send', ...lastTurn });
+}
+function openRecap() {
+	if (busy || !hasDiscussion) return;
+	if (recapText) { setView('recap'); return; }
+	send('Finish this review with a concise recap of my current goal, what I demonstrated through my own answers, and what remains uncertain or unexplored. If understanding has not been checked, say so. Do not ask further reasoning questions.', 'recap');
+}
+function addDraft(text) {
+	if (busy) return;
+	if (!goal) {
+		setView('goal');
+		goalInput.value = goalInput.value.trim() ? goalInput.value + '\n\n' + text : text;
+		goalInput.focus();
+		return;
+	}
+	setView('discussion');
+	input.value = input.value.trim() ? input.value + '\n\n' + text : text;
+	input.focus();
+}
+function browseCode() {
+	if (!context) return;
+	setView('goal');
+	byId('sources').scrollIntoView({ block: 'nearest' });
+}
+byId('goal-form').addEventListener('submit', event => {
+	event.preventDefault();
+	const text = goalInput.value.trim();
+	if (hasDiscussion && text === goal) setView('discussion');
+	else send(text, 'goal');
+});
+byId('form').addEventListener('submit', event => { event.preventDefault(); send(input.value.trim()); });
+for (const [field, form] of [[input, byId('form')], [goalInput, byId('goal-form')]]) {
+	field.addEventListener('keydown', event => {
+		if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); form.requestSubmit(); }
+	});
+}
+for (const button of document.querySelectorAll('[data-goal]')) button.addEventListener('click', () => { goalInput.value = button.dataset.goal; goalInput.focus(); });
+for (const button of document.querySelectorAll('[data-question]')) button.addEventListener('click', () => addDraft(button.dataset.question));
+byId('restart').addEventListener('click', start);
+byId('nav-goal').addEventListener('click', () => setView('goal'));
+byId('nav-discussion').addEventListener('click', () => { if (hasDiscussion) setView('discussion'); });
+byId('nav-recap').addEventListener('click', openRecap);
+byId('edit-goal').addEventListener('click', () => { goalInput.value = goal; setView('goal'); });
+byId('browse-code').addEventListener('click', browseCode);
+byId('show-code').addEventListener('click', () => {
+	if (previewReference) { const { sourceId, line, endLine } = previewReference; showCode(sourceId, line, endLine); }
+	else if (context?.sources.length === 1) {
+		const source = context.sources[0];
+		showCode(1, source.startLine ?? 1, (source.startLine ?? 1) + source.content.split('\n').length - 1);
+	} else browseCode();
+});
+document.addEventListener('selectionchange', selectPreviewCode);
+byId('close-preview').addEventListener('click', () => { byId('preview').hidden = true; (view === 'goal' ? goalInput : input).focus(); });
+byId('show-all-code').addEventListener('click', () => {
+	if (previewReference) { const { sourceId, line, endLine } = previewReference; showCode(sourceId, line, endLine, true); }
+});
+byId('open-snapshot').addEventListener('click', () => { if (previewReference) vscode.postMessage({ type: 'reference', ...previewReference }); });
+byId('ask-code').addEventListener('click', () => {
+	if (!previewReference) return;
+	const { sourceId, line, endLine } = previewReference;
+	addDraft('Help me trace ' + context.sources[sourceId - 1].name + ' lines ' + line + '-' + endLine + ' [[' + sourceId + ':' + line + '-' + endLine + ']]. What happens step by step with a concrete example?');
+});
+byId('recap').addEventListener('click', openRecap);
+byId('keep-studying').addEventListener('click', () => {
+	finished = false;
+	byId('finished-note').hidden = true;
+	byId('finish').textContent = 'Finish review';
+	setBusy(false);
+	setView('discussion');
+});
+byId('finish').addEventListener('click', () => {
+	finished = true;
+	byId('finished-note').hidden = false;
+	byId('finish').textContent = 'Review finished';
+	byId('finish').disabled = true;
+});
+byId('cancel').addEventListener('click', () => { vscode.postMessage({ type: 'cancel' }); byId('status').textContent = 'Cancelling…'; });
+byId('retry').addEventListener('click', () => {
+	if (!context) { setBusy(true); vscode.postMessage({ type: 'init' }); }
+	else if (failed && lastTurn) send(lastTurn.text, lastTurn.kind);
+});
+window.addEventListener('message', event => {
+	const message = event.data;
+	if (message.type === 'context') {
+		context = message.context;
+		byId('scope').textContent = context.label;
+		renderFiles();
+		byId('diff').textContent = context.diff ?? '';
+		byId('diff').hidden = !context.diff;
+		setBusy(false);
+		goalInput.focus();
+	}
+	if (message.type === 'chunk' && busy) {
+		if (!partialReply) {
+			partialReply = addMessage('CodeTogether', '');
+			partialText = document.createElement('span');
+			partialReply.append(partialText);
+		}
+		partialText.append(document.createTextNode(message.text));
+		byId('status').textContent = 'Receiving response…';
+	}
+	if (message.type === 'reply' && lastTurn) {
+		partialReply?.remove();
+		partialReply = undefined;
+		addMessage('CodeTogether', message.text);
+		draftMessage = undefined;
+		hasDiscussion = true;
+		assessment = message.assessment;
+		if (lastTurn.kind === 'goal') {
+			goal = lastTurn.text;
+			goalInput.value = goal;
+			byId('current-goal').textContent = goal;
+		}
+		if (lastTurn.kind === 'recap') {
+			recapText = message.text;
+			byId('recap-body').replaceChildren();
+			appendText(byId('recap-body'), recapText);
+			byId('recap-goal').textContent = goal;
+			byId('recap-title').textContent = 'Make sense of what you learned.';
+		} else recapText = '';
+		if (lastTurn.kind === 'discussion' && input.value.trim() === lastTurn.text) input.value = '';
+		renderAssessment();
+		setBusy(false);
+		if (lastTurn.kind === 'recap') setView('recap');
+		else input.focus();
+	}
+	if (message.type === 'error') {
+		partialReply?.remove();
+		partialReply = undefined;
+		draftMessage?.remove();
+		draftMessage = undefined;
+		failed = true;
+		if (lastTurn?.kind === 'goal') setView('goal');
+		setBusy(false);
+		byId('status').textContent = message.text;
+		byId('retry').hidden = false;
+		if (lastTurn?.kind === 'discussion') input.value = lastTurn.text;
+	}
+});
+start();

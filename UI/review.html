@@ -1,634 +1,84 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-	<title>CodeTogether Review</title>
-
-	<style>
-		:root {
-			--accent: #7c5cff;
-			--accent-2: #22d3ee;
-			--gradient: linear-gradient(135deg, var(--accent), var(--accent-2));
-			--surface: rgba(128, 128, 128, 0.10);
-			--surface-strong: rgba(128, 128, 128, 0.18);
-			--border: var(--vscode-widget-border, rgba(128, 128, 128, 0.30));
-		}
-
-		* { box-sizing: border-box; }
-
-		html, body {
-			height: 100%;
-			margin: 0;
-		}
-
-		body {
-			font-family: var(--vscode-font-family);
-			color: var(--vscode-editor-foreground);
-			background: var(--vscode-editor-background);
-		}
-
-		.app {
-			display: grid;
-			grid-template-columns: 290px 1fr;
-			height: 100vh;
-		}
-
-		/* ---------- Sidebar ---------- */
-		.sidebar {
-			display: flex;
-			flex-direction: column;
-			gap: 20px;
-			padding: 22px 18px;
-			background: var(--surface);
-			border-right: 1px solid var(--border);
-			overflow-y: auto;
-		}
-
-		.brand {
-			display: flex;
-			align-items: center;
-			gap: 12px;
-		}
-
-		.logo {
-			display: grid;
-			place-items: center;
-			width: 40px;
-			height: 40px;
-			font-size: 20px;
-			border-radius: 12px;
-			background: var(--gradient);
-			box-shadow: 0 4px 16px rgba(124, 92, 255, 0.45);
-		}
-
-		.brand h1 {
-			margin: 0;
-			font-size: 18px;
-			letter-spacing: 0.3px;
-		}
-
-		.brand p {
-			margin: 2px 0 0;
-			font-size: 12px;
-			color: var(--vscode-descriptionForeground);
-		}
-
-		.side-title {
-			display: flex;
-			align-items: center;
-			justify-content: space-between;
-			margin: 0 0 10px;
-			font-size: 11px;
-			font-weight: 600;
-			letter-spacing: 1px;
-			text-transform: uppercase;
-			color: var(--vscode-descriptionForeground);
-		}
-
-		.badge {
-			min-width: 22px;
-			padding: 2px 8px;
-			font-size: 11px;
-			text-align: center;
-			color: #fff;
-			border-radius: 999px;
-			background: var(--gradient);
-		}
-
-		#fileStatus {
-			margin: 0 0 10px;
-			font-size: 12px;
-			color: var(--vscode-descriptionForeground);
-		}
-
-		ul {
-			list-style: none;
-			margin: 0 0 12px;
-			padding: 0;
-		}
-
-		li {
-			display: flex;
-			flex-direction: column;
-			gap: 6px;
-			padding: 10px 12px;
-			margin-bottom: 8px;
-			border: 1px solid var(--border);
-			border-left: 3px solid var(--accent);
-			border-radius: 8px;
-			background: var(--surface);
-		}
-
-		.filename {
-			font-size: 13px;
-			font-weight: 600;
-			overflow-wrap: anywhere;
-		}
-
-		.counts {
-			display: flex;
-			gap: 8px;
-			font-size: 12px;
-			font-family: var(--vscode-editor-font-family, monospace);
-			white-space: nowrap;
-		}
-
-		.added {
-			color: var(--vscode-gitDecoration-addedResourceForeground, #73c991);
-		}
-
-		.removed {
-			color: var(--vscode-gitDecoration-deletedResourceForeground, #f48771);
-		}
-
-		/* ---------- Buttons ---------- */
-		button {
-			padding: 9px 16px;
-			font: inherit;
-			font-weight: 600;
-			color: #fff;
-			border: none;
-			border-radius: 8px;
-			background: var(--gradient);
-			cursor: pointer;
-			transition: transform 0.1s ease, box-shadow 0.15s ease, filter 0.15s ease;
-		}
-
-		button:hover {
-			filter: brightness(1.1);
-			box-shadow: 0 4px 14px rgba(124, 92, 255, 0.4);
-		}
-
-		button:active {
-			transform: translateY(1px);
-		}
-
-		button:disabled {
-			opacity: 0.55;
-			cursor: wait;
-			box-shadow: none;
-		}
-
-		button.secondary {
-			width: 100%;
-			color: var(--vscode-editor-foreground);
-			background: var(--surface-strong);
-		}
-
-		button.secondary:hover {
-			box-shadow: none;
-		}
-
-		button:focus-visible,
-		textarea:focus-visible {
-			outline: 2px solid var(--vscode-focusBorder, var(--accent));
-			outline-offset: 2px;
-		}
-
-		/* ---------- Main ---------- */
-		.main {
-			display: flex;
-			flex-direction: column;
-			min-width: 0;
-			height: 100vh;
-		}
-
-		.topbar {
-			display: flex;
-			align-items: center;
-			justify-content: space-between;
-			padding: 16px 28px;
-			border-bottom: 1px solid var(--border);
-			background: linear-gradient(90deg, rgba(124, 92, 255, 0.14), rgba(34, 211, 238, 0.06));
-		}
-
-		.topbar h2 {
-			margin: 0;
-			font-size: 15px;
-		}
-
-		.topbar p {
-			margin: 2px 0 0;
-			font-size: 12px;
-			color: var(--vscode-descriptionForeground);
-		}
-
-		.pill {
-			display: flex;
-			align-items: center;
-			gap: 8px;
-			padding: 5px 12px;
-			font-size: 12px;
-			border: 1px solid var(--border);
-			border-radius: 999px;
-			background: var(--surface);
-		}
-
-		.pill::before {
-			content: '';
-			width: 8px;
-			height: 8px;
-			border-radius: 50%;
-			background: #4ade80;
-		}
-
-		.pill.busy::before {
-			background: #fbbf24;
-			animation: pulse-dot 1s infinite;
-		}
-
-		#thread {
-			flex: 1;
-			padding: 24px 28px;
-			overflow-y: auto;
-		}
-
-		.composer {
-			padding: 16px 28px 22px;
-			border-top: 1px solid var(--border);
-			background: var(--surface);
-		}
-
-		.composer-box {
-			display: flex;
-			flex-direction: column;
-			gap: 10px;
-			padding: 12px;
-			border: 1px solid var(--border);
-			border-radius: 12px;
-			background: var(--vscode-input-background, var(--vscode-editor-background));
-			transition: border-color 0.15s ease, box-shadow 0.15s ease;
-		}
-
-		.composer-box:focus-within {
-			border-color: var(--accent);
-			box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.25);
-		}
-
-		label {
-			font-size: 12px;
-			font-weight: 600;
-			color: var(--vscode-descriptionForeground);
-		}
-
-		textarea {
-			width: 100%;
-			min-height: 80px;
-			padding: 0;
-			font: inherit;
-			color: var(--vscode-input-foreground, var(--vscode-editor-foreground));
-			background: transparent;
-			border: none;
-			resize: vertical;
-		}
-
-		textarea:focus-visible {
-			outline: none;
-		}
-
-		.composer-actions {
-			display: flex;
-			align-items: center;
-			justify-content: space-between;
-		}
-
-		.hint {
-			font-size: 11px;
-			color: var(--vscode-descriptionForeground);
-		}
-
-		/* ---------- Messages ---------- */
-		.message {
-			display: flex;
-			gap: 12px;
-			align-items: flex-start;
-			margin-bottom: 20px;
-			animation: rise 0.25s ease-out;
-		}
-
-		.message.user {
-			flex-direction: row-reverse;
-		}
-
-		.avatar {
-			display: grid;
-			flex-shrink: 0;
-			place-items: center;
-			width: 40px;
-			height: 40px;
-			font-size: 22px;
-			line-height: 1;
-			border-radius: 50%;
-			background: var(--gradient);
-			box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.25), 0 4px 14px rgba(124, 92, 255, 0.4);
-		}
-
-		.message.thinking .avatar {
-			animation: glow 1.4s infinite ease-in-out;
-		}
-
-		.content {
-			max-width: 78%;
-		}
-
-		.sender {
-			margin-bottom: 4px;
-			font-size: 11px;
-			font-weight: 600;
-			letter-spacing: 0.8px;
-			text-transform: uppercase;
-			color: var(--accent-2);
-		}
-
-		.bubble {
-			padding: 12px 16px;
-			line-height: 1.65;
-			white-space: pre-wrap;
-			border: 1px solid var(--border);
-			border-left: 3px solid var(--accent-2);
-			border-radius: 4px 14px 14px 14px;
-			background: var(--surface);
-		}
-
-		.message.user .bubble {
-			color: #fff;
-			border: none;
-			border-radius: 14px 4px 14px 14px;
-			background: var(--gradient);
-			box-shadow: 0 4px 16px rgba(124, 92, 255, 0.3);
-		}
-
-		.dots span {
-			display: inline-block;
-			width: 7px;
-			height: 7px;
-			margin: 0 2px;
-			border-radius: 50%;
-			background: var(--accent);
-			animation: bounce 1.2s infinite ease-in-out;
-		}
-
-		.dots span:nth-child(2) { animation-delay: 0.15s; }
-		.dots span:nth-child(3) { animation-delay: 0.3s; }
-
-		@keyframes bounce {
-			0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-			30% { transform: translateY(-5px); opacity: 1; }
-		}
-
-		@keyframes rise {
-			from { opacity: 0; transform: translateY(8px); }
-			to { opacity: 1; transform: translateY(0); }
-		}
-
-		@keyframes glow {
-			0%, 100% { box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.25), 0 4px 14px rgba(124, 92, 255, 0.4); }
-			50% { box-shadow: 0 0 0 7px rgba(34, 211, 238, 0.25), 0 4px 22px rgba(34, 211, 238, 0.6); }
-		}
-
-		@keyframes pulse-dot {
-			0%, 100% { opacity: 1; }
-			50% { opacity: 0.3; }
-		}
-
-		@media (prefers-reduced-motion: reduce) {
-			.dots span,
-			.message.thinking .avatar,
-			.pill.busy::before,
-			.message { animation: none; }
-		}
-
-		@media (max-width: 700px) {
-			.app { grid-template-columns: 1fr; height: auto; }
-			.sidebar { border-right: none; border-bottom: 1px solid var(--border); }
-			.main { height: 80vh; }
-		}
-	</style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}';">
+<title>CodeTogether</title>
+<link rel="stylesheet" href="{{styleUri}}">
 </head>
-
 <body>
-	<div class="app">
-		<aside class="sidebar">
-			<div class="brand">
-				<div class="logo">🧠</div>
-				<div>
-					<h1>CodeTogether</h1>
-					<p>Understand it before you commit it</p>
-				</div>
-			</div>
-
-			<div>
-				<h2 class="side-title">
-					<span>Staged files</span>
-					<span class="badge" id="fileCount">0</span>
-				</h2>
-
-				<p id="fileStatus" role="status">Loading files...</p>
-				<ul id="files" aria-label="Changed files"></ul>
-
-				<button id="refreshFiles" class="secondary" type="button">↻ Refresh files</button>
-			</div>
-		</aside>
-
-		<main class="main">
-			<header class="topbar">
-				<div>
-					<h2>Review session</h2>
-					<p>Explain your staged changes and get feedback.</p>
-				</div>
-				<div class="pill" id="statusPill">Ready</div>
-			</header>
-
-			<div id="thread" role="log" aria-live="polite"></div>
-
-			<form class="composer" id="explanationForm">
-				<div class="composer-box">
-					<label for="explanation">
-						What did you change, and how does it work?
-					</label>
-
-					<textarea
-						id="explanation"
-						placeholder="Explain your changes in your own words..."
-						required
-					></textarea>
-
-					<div class="composer-actions">
-						<span class="hint">Ctrl/Cmd + Enter to send</span>
-						<button id="submit" type="submit">Submit explanation ➤</button>
-					</div>
-				</div>
-			</form>
-		</main>
-	</div>
-
-	<script>
-		const vscode = acquireVsCodeApi();
-
-		const filesList = document.getElementById('files');
-		const fileStatus = document.getElementById('fileStatus');
-		const fileCount = document.getElementById('fileCount');
-		const statusPill = document.getElementById('statusPill');
-		const thread = document.getElementById('thread');
-		const submitButton = document.getElementById('submit');
-		const explanation = document.getElementById('explanation');
-		const form = document.getElementById('explanationForm');
-
-		let thinkingMsg = null;
-
-		function setStatus(busy) {
-			statusPill.textContent = busy ? 'Thinking...' : 'Ready';
-			statusPill.classList.toggle('busy', busy);
-		}
-
-		function addMessage(role, text, face) {
-			const msg = document.createElement('div');
-			msg.className = 'message ' + role;
-
-			if (role === 'tutor') {
-				const avatar = document.createElement('div');
-				avatar.className = 'avatar';
-				avatar.textContent = face;
-				msg.appendChild(avatar);
-			}
-
-			const content = document.createElement('div');
-			content.className = 'content';
-
-			if (role === 'tutor') {
-				const sender = document.createElement('div');
-				sender.className = 'sender';
-				sender.textContent = 'Tutor';
-				content.appendChild(sender);
-			}
-
-			const bubble = document.createElement('div');
-			bubble.className = 'bubble';
-			bubble.textContent = text;
-			content.appendChild(bubble);
-
-			msg.appendChild(content);
-			thread.appendChild(msg);
-			msg.scrollIntoView({ behavior: 'smooth', block: 'end' });
-			return msg;
-		}
-
-		function showThinking() {
-			thinkingMsg = addMessage('tutor', '', '🤔');
-			thinkingMsg.classList.add('thinking');
-			thinkingMsg.querySelector('.bubble').innerHTML =
-				'<span class="dots"><span></span><span></span><span></span></span>';
-			setStatus(true);
-		}
-
-		// Ask the extension for the staged file list.
-		function loadFiles() {
-			fileStatus.textContent = 'Loading files...';
-			vscode.postMessage({ type: 'loadFiles' });
-		}
-
-		document.getElementById('refreshFiles')
-			.addEventListener('click', loadFiles);
-
-		// Ctrl/Cmd + Enter submits.
-		explanation.addEventListener('keydown', (event) => {
-			if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-				form.requestSubmit();
-			}
-		});
-
-		// Send the explanation to the extension.
-		form.addEventListener('submit', (event) => {
-			event.preventDefault();
-
-			const answer = explanation.value.trim();
-
-			if (!answer) {
-				addMessage('tutor', 'Please enter an explanation first.', '🙂');
-				return;
-			}
-
-			submitButton.disabled = true;
-			addMessage('user', answer);
-			explanation.value = '';
-			showThinking();
-
-			vscode.postMessage({
-				type: 'submitExplanation',
-				answer: answer
-			});
-		});
-
-		// Receive messages from the extension.
-		window.addEventListener('message', (event) => {
-			const message = event.data;
-
-			if (message.type === 'changedFiles') {
-				filesList.replaceChildren();
-
-				fileCount.textContent = message.files.length;
-				fileStatus.textContent = message.files.length === 0
-					? 'No staged changes. Stage a file in Source Control.'
-					: message.files.length + ' staged file(s)';
-
-				for (const file of message.files) {
-					const item = document.createElement('li');
-
-					const name = document.createElement('span');
-					name.className = 'filename';
-					name.textContent = file.name;
-
-					const counts = document.createElement('span');
-					counts.className = 'counts';
-
-					if (file.added === '-' || file.removed === '-') {
-						counts.textContent = 'Binary file';
-					} else {
-						const added = document.createElement('span');
-						added.className = 'added';
-						added.textContent = '+' + file.added;
-
-						const removed = document.createElement('span');
-						removed.className = 'removed';
-						removed.textContent = '−' + file.removed;
-
-						counts.append(added, removed);
-					}
-
-					item.append(name, counts);
-					filesList.appendChild(item);
-				}
-			}
-
-			if (message.type === 'feedback') {
-				const thinking = message.text === 'Thinking...';
-				submitButton.disabled = thinking;
-				setStatus(thinking);
-
-				if (thinking) {
-					if (!thinkingMsg) showThinking();
-				} else if (thinkingMsg) {
-					thinkingMsg.classList.remove('thinking');
-					thinkingMsg.querySelector('.avatar').textContent = '🧐';
-					thinkingMsg.querySelector('.bubble').textContent = message.text;
-					thinkingMsg = null;
-				} else {
-					addMessage('tutor', message.text, '🧐');
-				}
-
-				// Surface file-loading errors from the current handler.
-				if (fileStatus.textContent === 'Loading files...') {
-					fileStatus.textContent =
-						'If files did not load, check the conversation.';
-				}
-			}
-		});
-
-		// Greet the user, then load files after the message listener is ready.
-		addMessage('tutor', 'Hi! Stage some changes, then explain them to me in your own words.', '🙂');
-		loadFiles();
-	</script>
+<main>
+<header class="header"><span class="wordmark">CodeTogether</span><div class="header-actions"><span id="review-kind" class="eyebrow">Code review</span><button id="restart" class="text-button" type="button">New review</button></div></header>
+<nav class="steps" aria-label="Review steps">
+<button id="nav-goal" type="button" aria-current="step"><span>01</span> Your goal</button>
+<button id="nav-discussion" type="button" disabled><span>02</span> Talk it through</button>
+<button id="nav-recap" type="button" disabled><span>03</span> Recap</button>
+</nav>
+<section id="goal-view" class="view" aria-labelledby="goal-title">
+<p id="totals" class="eyebrow">Loading files…</p>
+<h1 id="goal-title">What should you understand<br>before this ships?</h1>
+<p class="intro">A little reasoning now. A change you can explain later.</p>
+<form id="goal-form">
+<label for="goal-input">Your goal</label>
+<textarea id="goal-input" placeholder="What are you trying to accomplish, and what would you like to understand before committing?" required></textarea>
+<div class="starters"><p class="eyebrow">Or start from</p>
+<button class="starter" data-goal="Walk me through the main changes." type="button">Walk me through the main changes <span aria-hidden="true">→</span></button>
+<button class="starter" data-goal="Help me understand where these changes could break." type="button">Where could this break? <span aria-hidden="true">→</span></button>
+<button class="starter" data-goal="Help me understand why these changes were written this way. Distinguish what the code shows from inferred intent." type="button">Why was it written this way? <span aria-hidden="true">→</span></button>
+</div>
+<div class="section-heading"><h2>In this review</h2><span id="snapshot-kind" class="eyebrow">Staged snapshot</span></div>
+<div id="sources"></div>
+<details class="scope"><summary>Scope &amp; diff</summary><p id="scope" class="muted">Loading…</p><pre id="diff" hidden></pre><p class="muted">Only supplied code is included. Callers, other files, and runtime behavior have not been checked.</p></details>
+<div class="footer"><button id="begin" class="primary wide" type="submit">Begin review <span aria-hidden="true">→</span></button></div>
+</form>
+</section>
+<section id="discussion-view" class="view" hidden aria-label="Talk it through">
+<div class="goal-strip"><div><span class="eyebrow">Your goal</span><p id="current-goal"></p></div><button id="edit-goal" class="text-button" type="button">Edit</button></div>
+<div id="concept-nav" class="concept-nav" aria-label="Discussion topics"></div>
+<div class="section-heading discussion-heading"><p class="eyebrow">Think it through, in your words</p><button id="browse-code" class="text-button" type="button">Browse files</button></div>
+<div id="thread" role="log" aria-live="polite" aria-label="Review conversation"></div>
+<div id="conversation-tools" class="quick-actions">
+<button data-question="I'd like to explain this back in my own words. Ask me one focused question about my goal without giving away the answer." type="button">Explain it back</button>
+<button data-question="Give me one concrete edge case to reason through for my current goal. Let me predict what happens before revealing the answer." type="button">Challenge this</button>
+<button id="show-code" type="button">Show code</button>
+<button data-question="Something seems off in the explanation. Help me check it against the supplied code." type="button">Seems off</button>
+</div>
+<form id="form" class="composer">
+<label id="input-label" for="input">Reply, ask, or push back</label>
+<div class="reply-row"><textarea id="input" placeholder="Share your reasoning, or ask for a concrete example…" required></textarea><button id="send" class="primary" type="submit">Send</button></div>
+<div class="composer-meta"><span class="muted">Ctrl/Cmd + Enter to send</span><button id="recap" class="text-button" type="button">Go to recap →</button></div>
+</form>
+</section>
+<section id="recap-view" class="view" hidden aria-labelledby="recap-title">
+<div class="recap-hero">
+<svg id="brain" class="brain" viewBox="0 0 120 112" role="img" aria-labelledby="brain-title brain-description">
+<title id="brain-title">Evidence of understanding</title><desc id="brain-description">No assessment yet.</desc>
+<defs><clipPath id="brain-clip"><path d="M60 15C48 1 31 9 29 21C15 19 5 33 12 46C0 58 7 74 20 78C18 93 33 104 46 98C52 111 65 109 69 98C85 105 102 94 100 80C115 75 120 59 109 47C117 33 105 20 92 21C88 6 70 3 60 15Z"/></clipPath></defs>
+<path class="brain-base" d="M60 15C48 1 31 9 29 21C15 19 5 33 12 46C0 58 7 74 20 78C18 93 33 104 46 98C52 111 65 109 69 98C85 105 102 94 100 80C115 75 120 59 109 47C117 33 105 20 92 21C88 6 70 3 60 15Z"/>
+<rect id="brain-fill" x="0" y="112" width="120" height="0" clip-path="url(#brain-clip)"/>
+<g class="brain-lines" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M60 15V96M29 21C27 34 39 40 45 34M12 46C24 41 35 49 32 60M20 78C30 73 44 80 42 90M45 55C51 52 56 59 60 65M92 21C95 33 83 40 77 34M109 47C97 42 86 50 89 60M100 80C89 74 76 81 78 91M76 55C69 52 65 59 60 65"/></g>
+</svg>
+<div><p class="eyebrow">Your review, reflected back</p><h1 id="recap-title">Make sense of<br>what you learned.</h1></div>
+</div>
+<p id="progress-description" class="muted">The brain fills when your answers support a concept. It is a model assessment, not a score.</p>
+<p class="eyebrow">Goal</p><p id="recap-goal" class="recap-goal"></p>
+<div id="concepts" aria-label="Evidence by topic"></div>
+<section id="quote-section" class="recap-section" hidden><h2 class="eyebrow">In your words</h2><blockquote id="evidence-quote"></blockquote></section>
+<section class="recap-section"><h2 class="eyebrow">Review notes</h2><div id="recap-body" class="prose"></div></section>
+<section class="recap-section"><h2 class="eyebrow">Still uncertain</h2><ul id="uncertainties"></ul></section>
+<p class="muted">A filled brain reflects evidence in this conversation. It does not certify the change or check unseen code.</p>
+<div class="footer recap-footer"><button id="keep-studying" class="primary" type="button">Keep exploring</button><button id="finish" type="button">Finish review</button></div>
+<p id="finished-note" class="muted" role="status" hidden>Review finished. Your conversation stays available until you close this panel. No commit or push was made.</p>
+</section>
+<section id="preview" class="code-panel" hidden aria-label="Code preview">
+<div class="section-heading"><h2 id="preview-title"></h2><div><button id="show-all-code" class="text-button" type="button">Show all</button><button id="close-preview" class="text-button" type="button">Close code</button></div></div>
+<p id="preview-selection" class="muted" role="status">Drag over code to select the lines you want to discuss.</p>
+<pre id="code-preview" tabindex="0" aria-label="Supplied code snapshot"></pre>
+<div class="actions"><button id="open-snapshot" type="button">Open in editor</button><button id="ask-code" type="button">Ask about this code</button></div>
+</section>
+<div class="request-status"><p id="status" role="status" aria-live="polite"></p><button id="cancel" class="text-button" type="button" hidden>Cancel</button><button id="retry" type="button" hidden>Retry</button></div>
+</main>
+<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
 </body>
 </html>

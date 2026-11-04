@@ -20,6 +20,11 @@
       "type": "string",
       "default": "",
       "description": "Ollama model name. Use an exact name from ollama list."
+    },
+    "codetogether.thinking": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable thinking for models that support it. May improve reasoning but delay the visible answer. Models with mandatory thinking may ignore this setting."
     }
   }
 },
@@ -33,7 +38,7 @@
       
       {
       "command": "codetogether.explainChanges",
-      "title": "CodeTogether: Explain My Changes"
+      "title": "CodeTogether: Understand This Change"
     },
 
     {
@@ -42,11 +47,23 @@
     },
 
     {
+      "command": "codetogether.understandCode",
+      "title": "CodeTogether: Understand This Code"
+    },
+    {
       "command": "codetogether.chooseModel",
       "title": "CodeTogether: Choose Model"
     }
 
-    ]
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "codetogether.understandCode", "when": "editorHasSelection", "group": "navigation" }
+      ],
+      "scm/resourceState/context": [
+        { "command": "codetogether.explainChanges", "when": "scmProvider == git && scmResourceGroup == index", "group": "navigation" }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -54,7 +71,7 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "node --test out/test/extension.test.js out/test/review.test.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.140.0",
