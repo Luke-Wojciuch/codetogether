@@ -13,7 +13,8 @@
 <nav class="steps" aria-label="Review steps">
 <button id="nav-goal" type="button" aria-current="step"><span>01</span> Your goal</button>
 <button id="nav-discussion" type="button" disabled><span>02</span> Talk it through</button>
-<button id="nav-recap" type="button" disabled><span>03</span> Recap</button>
+<button id="nav-test" type="button" disabled><span>03</span> Test understanding</button>
+<button id="nav-recap" type="button" disabled><span>04</span> Recap</button>
 </nav>
 <section id="goal-view" class="view" aria-labelledby="goal-title">
 <p id="totals" class="eyebrow">Loading files…</p>
@@ -23,9 +24,9 @@
 <label for="goal-input">Your goal</label>
 <textarea id="goal-input" placeholder="What are you trying to accomplish, and what would you like to understand before committing?" required></textarea>
 <div class="starters"><p class="eyebrow">Or start from</p>
-<button class="starter" data-goal="Walk me through the main changes." type="button">Walk me through the main changes <span aria-hidden="true">→</span></button>
-<button class="starter" data-goal="Help me understand where these changes could break." type="button">Where could this break? <span aria-hidden="true">→</span></button>
-<button class="starter" data-goal="Help me understand why these changes were written this way. Distinguish what the code shows from inferred intent." type="button">Why was it written this way? <span aria-hidden="true">→</span></button>
+<button class="starter" data-goal="Help me build a general understanding of this code: its purpose and how the main parts connect." type="button">Help me see the big picture <span aria-hidden="true">→</span></button>
+<button class="starter" data-goal="Help me understand a specific method or code path. Let's find the part I need help with and trace a concrete example." type="button">Work through a specific part <span aria-hidden="true">→</span></button>
+<button class="starter" data-goal="Help me reason about where these changes could break, using a concrete scenario." type="button">Where could this break? <span aria-hidden="true">→</span></button>
 </div>
 <div class="section-heading"><h2>In this review</h2><span id="snapshot-kind" class="eyebrow">Staged snapshot</span></div>
 <div id="sources"></div>
@@ -36,19 +37,40 @@
 <section id="discussion-view" class="view" hidden aria-label="Talk it through">
 <div class="goal-strip"><div><span class="eyebrow">Your goal</span><p id="current-goal"></p></div><button id="edit-goal" class="text-button" type="button">Edit</button></div>
 <div id="concept-nav" class="concept-nav" aria-label="Discussion topics"></div>
-<div class="section-heading discussion-heading"><p class="eyebrow">Think it through, in your words</p><button id="browse-code" class="text-button" type="button">Browse files</button></div>
+<div class="section-heading discussion-heading"><p class="eyebrow">Explore the code, build your understanding</p><button id="browse-code" class="text-button" type="button">Browse files</button></div>
 <div id="thread" role="log" aria-live="polite" aria-label="Review conversation"></div>
 <div id="conversation-tools" class="quick-actions">
-<button data-question="I'd like to explain this back in my own words. Ask me one focused question about my goal without giving away the answer." type="button">Explain it back</button>
-<button data-question="Give me one concrete edge case to reason through for my current goal. Let me predict what happens before revealing the answer." type="button">Challenge this</button>
+<button data-question="Help me with the next step. Give me a small hint and point to the relevant code." type="button">Give me a hint</button>
+<button data-question="I'm stuck. Explain this part with a concrete example so I can continue reasoning about it." type="button">Work through an example</button>
 <button id="show-code" type="button">Show code</button>
-<button data-question="Something seems off in the explanation. Help me check it against the supplied code." type="button">Seems off</button>
+<button data-question="Something seems off. Let's check the reasoning against the supplied code." type="button">Seems off</button>
 </div>
 <form id="form" class="composer">
-<label id="input-label" for="input">Reply, ask, or push back</label>
-<div class="reply-row"><textarea id="input" placeholder="Share your reasoning, or ask for a concrete example…" required></textarea><button id="send" class="primary" type="submit">Send</button></div>
-<div class="composer-meta"><span class="muted">Ctrl/Cmd + Enter to send</span><button id="recap" class="text-button" type="button">Go to recap →</button></div>
+<label id="input-label" for="input">Ask, share your reasoning, or push back</label>
+<div class="reply-row"><textarea id="input" placeholder="What is unclear, or how do you think it works?" required></textarea><button id="send" class="primary" type="submit">Send</button></div>
+<div class="composer-meta"><span class="muted">Ctrl/Cmd + Enter to send</span><button id="test-understanding" class="text-button" type="button">Test understanding →</button></div>
 </form>
+</section>
+<section id="test-view" class="view" hidden aria-labelledby="test-title">
+<h1 id="test-title" tabindex="-1">Test your understanding.</h1>
+<p class="intro">Share your understanding of the code and goal you discussed. Short, informal answers are fine. Your answers are read together, so you don't need to repeat yourself across areas. Leave anything you're unsure about blank.</p>
+<p class="eyebrow">Your goal</p><p id="test-goal"></p>
+<form id="test-form">
+<div class="test-question"><label for="test-purpose">Purpose — What problem does this code solve?</label><textarea id="test-purpose" placeholder="Explain why it is needed."></textarea></div>
+<div class="test-question"><label for="test-behavior">Behavior — How does it work for one concrete input or starting state?</label><textarea id="test-behavior" placeholder="Trace the main steps to the output or state change."></textarea></div>
+<div class="test-question"><label for="test-effect">Effect — What consequence or failure can this flow cause, and why?</label><textarea id="test-effect" placeholder="Connect an outcome to the code that causes it."></textarea></div>
+<div class="test-question"><label for="test-edge">Edge cases — What happens at a boundary or unusual input?</label><textarea id="test-edge" placeholder="Describe one boundary and the behavior you expect."></textarea></div>
+<button id="check-understanding" class="primary" type="submit">Check understanding</button>
+</form>
+<section id="test-results" class="recap-section" hidden aria-labelledby="test-results-title">
+<h2 id="test-results-title" tabindex="-1">Your understanding</h2>
+<div id="test-summary" class="recap-section" aria-label="Results for all four areas"></div>
+<div id="test-feedback" class="prose"></div>
+<div id="test-gaps" class="test-gaps"></div>
+<p class="muted">You can continue with gaps recorded, or return to the discussion for help.</p>
+<button id="recap" class="primary" type="button">Continue to recap</button>
+</section>
+<div class="footer"><button id="back-to-talk" type="button">Back to talking</button></div>
 </section>
 <section id="recap-view" class="view" hidden aria-labelledby="recap-title">
 <div class="recap-hero">
@@ -61,7 +83,7 @@
 </svg>
 <div><p class="eyebrow">Your review, reflected back</p><h1 id="recap-title">Make sense of<br>what you learned.</h1></div>
 </div>
-<p id="progress-description" class="muted">The brain fills when your answers support a concept. It is a model assessment, not a score.</p>
+<p id="progress-description" class="muted">Your test covers all four areas. You can finish with gaps recorded or return to the discussion for help.</p>
 <p class="eyebrow">Goal</p><p id="recap-goal" class="recap-goal"></p>
 <div id="concepts" aria-label="Evidence by topic"></div>
 <section id="quote-section" class="recap-section" hidden><h2 class="eyebrow">In your words</h2><blockquote id="evidence-quote"></blockquote></section>

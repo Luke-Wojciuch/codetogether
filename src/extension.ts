@@ -91,7 +91,7 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 			const answer = message.text.trim();
-			const kind: TurnKind = message.kind === 'goal' || message.kind === 'recap' ? message.kind : 'discussion';
+			const kind: TurnKind = message.kind === 'goal' || message.kind === 'recap' || message.kind === 'test' ? message.kind : 'discussion';
 			const controller = new AbortController();
 			pending = controller;
 			const timeout = setTimeout(() => controller.abort(), 120_000);
@@ -108,7 +108,7 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 				let accumulated = '';
 				let sent = '';
-				const reply = await askModel(session.messages(answer), controller.signal, async text => {
+				const reply = await askModel(session.messages(answer, kind), controller.signal, async text => {
 					accumulated += text;
 					const visible = visibleReply(accumulated);
 					if (!controller.signal.aborted && visible.length > sent.length) {

@@ -21,6 +21,11 @@ button:disabled{opacity:.45;cursor:default}
 .text-button:hover:not(:disabled){color:var(--accent);background:transparent;text-decoration:underline}
 :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .view{flex:1;min-width:0}
+.test-question{margin:20px 0}
+.test-question textarea{min-height:76px}
+.test-gaps{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
+.steps{flex-wrap:wrap}
+.steps button{min-width:70px}
 h1{font:normal clamp(30px,6vw,42px)/1.1 var(--serif);letter-spacing:-1.3px;margin:14px 0 12px}
 h2{font-size:13px;font-weight:600;margin:0}
 .intro,.muted{color:var(--muted);font-size:12px}

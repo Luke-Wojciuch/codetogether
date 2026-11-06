@@ -1,6 +1,6 @@
 export const conceptIds = ['purpose', 'behavior', 'effect', 'edge'] as const;
 export type ConceptId = typeof conceptIds[number];
-export type TurnKind = 'goal' | 'discussion' | 'recap';
+export type TurnKind = 'goal' | 'discussion' | 'test' | 'recap';
 export interface Concept {
 	id: ConceptId;
 	status: 'unexplored' | 'discussed' | 'demonstrated';
@@ -8,10 +8,13 @@ export interface Concept {
 }
 export interface ReviewAssessment { concepts: Concept[]; uncertainties: string[] }
 
-export const assessmentInstructions = `After each response, append a separate <review-state>JSON</review-state> block for the UI.
+export const assessmentInstructions = `After the test feedback, append a separate <review-state>JSON</review-state> block for the UI.
 JSON shape: {"concepts":[{"id":"purpose","status":"unexplored"},{"id":"behavior","status":"discussed"},{"id":"effect","status":"demonstrated","quote":"exact words from a developer answer"},{"id":"edge","status":"unexplored"}],"uncertainties":["A specific remaining uncertainty"]}.
-Always include exactly these four ids: purpose (why), behavior (main flow), effect (consequences/failure), edge (boundary or limitation). Status is unexplored, discussed, or demonstrated. These are discussion topics, not required quiz questions.
-Use demonstrated only when a developer answer shows correct reasoning about that topic; include a verbatim quote of at least 12 characters from that answer. A goal, question, agreement, assistant explanation, or request to finish is not evidence. Use discussed when you explained it but the developer has not shown it. Reconsider evidence after corrections; clear assessments when the goal changes. This is a tentative model assessment, not a grade or certification. Keep the JSON out of the conversational prose.`;
+Always include exactly these four ids: purpose (why), behavior (main flow), effect (consequences/failure), edge (boundary or limitation). Status is unexplored, discussed, or demonstrated. Demonstrated means supported understanding. The developer can finish with gaps recorded; do not insist on all four passing.
+Only assess on a test turn. Read the submission as a whole and reason about what the developer means, using the conversation to resolve shorthand, pronouns, examples, and scope. Credit an area wherever its reasoning appears in the submitted answers, even under another heading. A blank field does not erase understanding expressed elsewhere. If an area has no evidence anywhere in the submission, leave it unexplored. Earlier discussion and tests provide context, not substitute evidence. On other turns preserve the latest test assessment.
+Judge conceptual understanding, not answer format or completeness against an imagined ideal answer. Accept informal wording, typos, concise answers, equivalent explanations, and correct implications that follow clearly from their words and supplied code. Do not require technical vocabulary, line citations, a step-by-step trace, a new example, or every implementation detail when the response already establishes the relevant idea. A brief answer can be sufficient in context; never demand elaboration just to make it longer. Do not infer reasoning the developer has not expressed or overlook an actual misconception.
+For demonstrated understanding, include a short, nonempty verbatim quote from the current submission that supports your judgment; there is no minimum quote length. A goal, question, bare agreement, unsupported guess, or assistant explanation alone is not evidence. Learning with help and using familiar terminology are allowed; distinguish applying an idea from simply repeating it. Use discussed when some understanding is visible but a meaningful gap or mistake remains. Reassess each area using the new submission without carrying earlier passes forward automatically. Clear assessments when the goal changes. Missing context is uncertainty, not a developer error.
+Respond proportionately: briefly name what the developer got right, then address only meaningful gaps. For a mostly correct response, acknowledge the core idea and offer a small refinement rather than treating the whole answer as wrong. For an ambiguous claim, say what needs clarifying instead of declaring failure. For an incorrect claim, explain the specific mismatch with the code without a long lecture. Cover the four areas concisely, combine feedback when one explanation covers several, and offer optional focused help or the recap. Do not launch another quiz or grade presentation quality. This is a model judgment, not a certification of code correctness. Keep the JSON out of the conversational prose.`;
 
 // Do not stream metadata, including a partially received opening tag, into the chat.
 export function visibleReply(raw: string): string {
@@ -36,7 +39,8 @@ export function parseAssessment(raw: string, answers: string[]): ReviewAssessmen
 			const item = matches[0];
 			if (!['unexplored', 'discussed', 'demonstrated'].includes(item.status)) { return; }
 			const quote = typeof item.quote === 'string' ? item.quote : '';
-			const supported = quote.trim().length >= 12 && answers.some(answer => answer.includes(quote));
+			// Validate provenance; the model judges whether these words show understanding.
+			const supported = quote.trim().length > 0 && answers.some(answer => answer.includes(quote));
 			concepts.push({ id, status: item.status === 'demonstrated' && !supported ? 'discussed' : item.status,
 				...(item.status === 'demonstrated' && supported ? { quote } : {}) });
 		}

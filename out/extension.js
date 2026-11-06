@@ -128,7 +128,7 @@ function activate(context) {
                 return;
             }
             const answer = message.text.trim();
-            const kind = message.kind === 'goal' || message.kind === 'recap' ? message.kind : 'discussion';
+            const kind = message.kind === 'goal' || message.kind === 'recap' || message.kind === 'test' ? message.kind : 'discussion';
             const controller = new AbortController();
             pending = controller;
             const timeout = setTimeout(() => controller.abort(), 120_000);
@@ -145,7 +145,7 @@ function activate(context) {
                 }
                 let accumulated = '';
                 let sent = '';
-                const reply = await (0, llm_1.askModel)(session.messages(answer), controller.signal, async (text) => {
+                const reply = await (0, llm_1.askModel)(session.messages(answer, kind), controller.signal, async (text) => {
                     accumulated += text;
                     const visible = (0, review_1.visibleReply)(accumulated);
                     if (!controller.signal.aborted && visible.length > sent.length) {

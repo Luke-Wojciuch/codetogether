@@ -3,7 +3,7 @@ const byId = id => document.getElementById(id);
 const input = byId('input');
 const goalInput = byId('goal-input');
 const topics = { purpose: 'Purpose', behavior: 'Behavior', effect: 'Effect', edge: 'Edge cases' };
-const statuses = { unexplored: 'Not explored', discussed: 'Discussed', demonstrated: 'Shown in your words' };
+const statuses = { unexplored: 'Not yet shown', discussed: 'Needs clarification', demonstrated: 'Understanding shown' };
 let context;
 let busy = false;
 let goal = '';
@@ -19,9 +19,14 @@ let assessment;
 let recapText = '';
 let finished = false;
 
+function allChecksPassed() {
+	return Object.keys(topics).every(id => assessment?.concepts?.some(concept =>
+		concept.id === id && concept.status === 'demonstrated'));
+}
+
 function setView(next) {
 	view = next;
-	for (const name of ['goal', 'discussion', 'recap']) {
+	for (const name of ['goal', 'discussion', 'test', 'recap']) {
 		byId(name + '-view').hidden = name !== next;
 		if (name === next) byId('nav-' + name).setAttribute('aria-current', 'step');
 		else byId('nav-' + name).removeAttribute('aria-current');
@@ -30,6 +35,10 @@ function setView(next) {
 	if (!failed) byId('status').textContent = '';
 	if (next === 'goal') goalInput.focus();
 	if (next === 'discussion') input.focus();
+	if (next === 'test') {
+		byId('test-goal').textContent = goal;
+		byId('test-title').focus();
+	}
 	if (next === 'recap') {
 		byId('recap-title').setAttribute('tabindex', '-1');
 		byId('recap-title').focus();
@@ -41,8 +50,14 @@ function setBusy(value) {
 	byId('nav-goal').disabled = value;
 	byId('nav-discussion').disabled = value || !hasDiscussion;
 	byId('nav-recap').disabled = value || !hasDiscussion;
+	byId('nav-test').disabled = value || !hasDiscussion;
+	byId('test-understanding').disabled = value || !hasDiscussion;
+	for (const id of ['check-understanding', 'back-to-talk']) byId(id).disabled = value || !hasDiscussion;
+	for (const id of Object.keys(topics)) byId('test-' + id).disabled = value;
+	for (const button of byId('test-gaps').children) button.disabled = value;
 	byId('recap').disabled = value || !hasDiscussion;
 	byId('finish').disabled = value || !context || finished;
+	byId('finish').title = 'Finish with any remaining gaps recorded';
 	for (const button of document.querySelectorAll('[data-goal], [data-question]')) button.disabled = value || !context;
 	input.disabled = value;
 	goalInput.disabled = value;
@@ -105,16 +120,16 @@ function renderAssessment() {
 		row.append(heading);
 		const note = document.createElement('p');
 		note.className = 'concept-evidence';
-		note.textContent = concept.quote ? '“' + concept.quote + '”' : assessment ? (concept.status === 'discussed' ? 'Explored together; not yet demonstrated in your answers.' : 'Still open to explore if relevant to your goal.') : 'The model has not supplied a usable assessment.';
+		note.textContent = concept.quote ? '“' + concept.quote + '”' : assessment ? (concept.status === 'discussed' ? 'Some understanding is visible; see the feedback for what needs clarification.' : 'This area has not yet been established by your responses.') : 'The model has not supplied a usable assessment.';
 		row.append(note);
 		byId('concepts').append(row);
 	}
 	const shown = concepts.filter(concept => concept.status === 'demonstrated').length;
 	byId('brain-fill').setAttribute('y', String(112 - shown * 28));
 	byId('brain-fill').setAttribute('height', String(shown * 28));
-	const description = assessment ? (shown ? 'Your answers support ' + shown + ' discussion ' + (shown === 1 ? 'topic' : 'topics') + '. See the evidence below.' : 'We have explored ideas, but your answers have not yet demonstrated them.') : 'No usable assessment yet. You can still finish or keep exploring.';
+	const description = assessment ? shown + ' of 4 areas supported by your test answers.' + (allChecksPassed() ? '' : ' You can finish with gaps recorded or get more help.') : 'No usable test assessment yet. You can finish with this uncertainty recorded or return to the discussion.';
 	byId('brain-description').textContent = description;
-	byId('progress-description').textContent = description + ' The brain reflects a model assessment, not a score.';
+	byId('progress-description').textContent = description + ' Passes reflect the model’s judgment of your reasoning, not proof of code correctness.';
 	const quotes = concepts.filter(concept => concept.quote).map(concept => concept.quote);
 	byId('quote-section').hidden = !quotes.length;
 	byId('evidence-quote').textContent = quotes.length ? '“' + quotes[quotes.length - 1] + '”' : '';
@@ -125,6 +140,35 @@ function renderAssessment() {
 		item.textContent = text;
 		byId('uncertainties').append(item);
 	}
+}
+function resetTest() {
+	for (const id of Object.keys(topics)) byId('test-' + id).value = '';
+	byId('test-results').hidden = true;
+	byId('test-feedback').replaceChildren();
+	byId('test-summary').replaceChildren();
+	byId('test-gaps').replaceChildren();
+}
+function renderTestResults(text) {
+	byId('test-feedback').replaceChildren();
+	appendText(byId('test-feedback'), text);
+	byId('test-gaps').replaceChildren();
+	byId('test-summary').replaceChildren();
+	for (const id of Object.keys(topics)) {
+		const concept = assessment?.concepts.find(concept => concept.id === id);
+		const row = document.createElement('p');
+		row.textContent = topics[id] + ': ' + (concept ? statuses[concept.status] : 'Not assessed');
+		byId('test-summary').append(row);
+		if (concept?.status === 'demonstrated') continue;
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.textContent = 'Help with ' + topics[id].toLowerCase();
+		button.addEventListener('click', () => {
+			if (busy) return;
+			send('Help me work on ' + topics[id].toLowerCase() + ' for my current goal, using the gap in my latest test answers. Explain the unclear part with relevant code and a concrete example, then leave room for me to reason.');
+		});
+		byId('test-gaps').append(button);
+	}
+	byId('test-results').hidden = false;
 }
 function showCode(sourceId, line, endLine = line, all = false) {
 	const source = context?.sources[sourceId - 1];
@@ -261,6 +305,7 @@ function start() {
 	previewReference = undefined;
 	assessment = undefined;
 	recapText = '';
+	resetTest();
 	finished = false;
 	input.value = '';
 	goalInput.value = '';
@@ -286,16 +331,17 @@ function send(text, kind = 'discussion') {
 	finished = false;
 	byId('finished-note').hidden = true;
 	byId('finish').textContent = 'Finish review';
-	setView('discussion');
+	setView(kind === 'test' ? 'test' : kind === 'recap' ? 'recap' : 'discussion');
 	byId('current-goal').textContent = kind === 'goal' ? text : goal;
-	draftMessage = kind === 'recap' ? undefined : addMessage(kind === 'goal' ? 'Your goal' : 'You', text);
+	draftMessage = kind === 'recap' || kind === 'test' ? undefined : addMessage(kind === 'goal' ? 'Your goal' : 'You', text);
+	if (kind === 'test') byId('test-results').hidden = true;
 	setBusy(true);
 	vscode.postMessage({ type: 'send', ...lastTurn });
 }
 function openRecap() {
 	if (busy || !hasDiscussion) return;
 	if (recapText) { setView('recap'); return; }
-	send('Finish this review with a concise recap of my current goal, what I demonstrated through my own answers, and what remains uncertain or unexplored. If understanding has not been checked, say so. Do not ask further reasoning questions.', 'recap');
+	send('Recap my goal, the latest test results with evidence from my answers, and any gaps or uncertainties. If no usable test assessment exists, say so. I may finish with gaps recorded. Do not ask further reasoning questions.', 'recap');
 }
 function addDraft(text) {
 	if (busy) return;
@@ -321,6 +367,15 @@ byId('goal-form').addEventListener('submit', event => {
 	else send(text, 'goal');
 });
 byId('form').addEventListener('submit', event => { event.preventDefault(); send(input.value.trim()); });
+byId('test-form').addEventListener('submit', event => {
+	event.preventDefault();
+	const answers = Object.keys(topics).map(id => topics[id] + ':\n' + (byId('test-' + id).value.trim() || 'Not answered'));
+	send('Understanding test answers for my current goal:\n\n' + answers.join('\n\n'), 'test');
+});
+for (const id of ['test-understanding', 'nav-test']) byId(id).addEventListener('click', () => {
+	if (!busy && hasDiscussion) setView('test');
+});
+byId('back-to-talk').addEventListener('click', () => { if (!busy) setView('discussion'); });
 for (const [field, form] of [[input, byId('form')], [goalInput, byId('goal-form')]]) {
 	field.addEventListener('keydown', event => {
 		if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); form.requestSubmit(); }
@@ -350,7 +405,7 @@ byId('open-snapshot').addEventListener('click', () => { if (previewReference) vs
 byId('ask-code').addEventListener('click', () => {
 	if (!previewReference) return;
 	const { sourceId, line, endLine } = previewReference;
-	addDraft('Help me trace ' + context.sources[sourceId - 1].name + ' lines ' + line + '-' + endLine + ' [[' + sourceId + ':' + line + '-' + endLine + ']]. What happens step by step with a concrete example?');
+	addDraft('Help me reason about ' + context.sources[sourceId - 1].name + ' lines ' + line + '-' + endLine + ' [[' + sourceId + ':' + line + '-' + endLine + ']]. Focus on this part, using concrete values or state changes where helpful.');
 });
 byId('recap').addEventListener('click', openRecap);
 byId('keep-studying').addEventListener('click', () => {
@@ -361,7 +416,9 @@ byId('keep-studying').addEventListener('click', () => {
 	setView('discussion');
 });
 byId('finish').addEventListener('click', () => {
+	if (busy || !context || finished || view !== 'recap') return;
 	finished = true;
+	byId('finished-note').textContent = allChecksPassed() ? 'Review finished. No commit or push was made.' : 'Review finished with gaps or unassessed understanding recorded above. No commit or push was made.';
 	byId('finished-note').hidden = false;
 	byId('finish').textContent = 'Review finished';
 	byId('finish').disabled = true;
@@ -383,6 +440,7 @@ window.addEventListener('message', event => {
 		goalInput.focus();
 	}
 	if (message.type === 'chunk' && busy) {
+		if (lastTurn?.kind === 'test') { byId('status').textContent = 'Checking all four areas…'; return; }
 		if (!partialReply) {
 			partialReply = addMessage('CodeTogether', '');
 			partialText = document.createElement('span');
@@ -394,11 +452,12 @@ window.addEventListener('message', event => {
 	if (message.type === 'reply' && lastTurn) {
 		partialReply?.remove();
 		partialReply = undefined;
-		addMessage('CodeTogether', message.text);
+		if (lastTurn.kind !== 'test') addMessage('CodeTogether', message.text);
 		draftMessage = undefined;
 		hasDiscussion = true;
 		assessment = message.assessment;
 		if (lastTurn.kind === 'goal') {
+			resetTest();
 			goal = lastTurn.text;
 			goalInput.value = goal;
 			byId('current-goal').textContent = goal;
@@ -410,10 +469,12 @@ window.addEventListener('message', event => {
 			byId('recap-goal').textContent = goal;
 			byId('recap-title').textContent = 'Make sense of what you learned.';
 		} else recapText = '';
+		if (lastTurn.kind === 'test') renderTestResults(message.text);
 		if (lastTurn.kind === 'discussion' && input.value.trim() === lastTurn.text) input.value = '';
 		renderAssessment();
 		setBusy(false);
 		if (lastTurn.kind === 'recap') setView('recap');
+		else if (lastTurn.kind === 'test') byId('test-results-title').focus();
 		else input.focus();
 	}
 	if (message.type === 'error') {
