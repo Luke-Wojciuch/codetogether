@@ -40,6 +40,7 @@ const node_test_1 = require("node:test");
 const node_vm_1 = require("node:vm");
 const review_1 = require("../review");
 const session_1 = require("../session");
+const stream_1 = require("../stream");
 const answer = 'A failed request can retry the same write twice.';
 const state = {
     concepts: review_1.conceptIds.map(id => ({ id, status: id === 'effect' ? 'demonstrated' : 'discussed', ...(id === 'effect' ? { quote: answer } : {}) })),
@@ -47,11 +48,78 @@ const state = {
 };
 const reply = 'The retry can repeat a write. [[1:10-11]]\n<review-state>' + JSON.stringify(state) + '</review-state>';
 (0, node_test_1.suite)('Review evidence', () => {
+    (0, node_test_1.test)('each blank field is skipped without affecting the other three judgments', async () => {
+        for (const blank of review_1.conceptIds) {
+            const answers = Object.fromEntries(review_1.conceptIds.map(id => [id, id === blank ? '' : 'answer for "' + id + '"']));
+            const calls = [];
+            const submission = JSON.stringify(answers);
+            const result = await (0, review_1.assessIndependently)(submission, async (answer, id) => {
+                calls.push(id);
+                assert.notEqual(id, blank);
+                assert.equal(answer, answers[id]);
+                return JSON.stringify({ feedback: 'This idea is correct.', concepts: review_1.conceptIds.map(area => ({
+                        id: area, status: area === id ? 'demonstrated' : 'unexplored', quote: area === id ? answer : ''
+                    })), uncertainties: [] });
+            });
+            assert.equal(calls.length, 3);
+            const session = new session_1.Session({ label: 'Independent areas', sources: [] });
+            session.complete(submission, result, 'test');
+            for (const concept of session.assessment.concepts) {
+                assert.equal(concept.status, concept.id === blank ? 'unexplored' : 'demonstrated');
+            }
+        }
+    });
+    (0, node_test_1.test)('four blank answers need no model request and produce four unexplored areas', async () => {
+        const result = await (0, review_1.assessIndependently)(JSON.stringify({ purpose: '', behavior: '', effect: '', edge: '' }), async () => {
+            assert.fail('Blank answers must not call the model.');
+        });
+        assert.ok((0, review_1.parseAssessment)(result, [])?.concepts.every(concept => concept.status === 'unexplored'));
+    });
+    (0, node_test_1.test)('assessment requests enforce structured output and return feedback with validated evidence', async () => {
+        const structured = JSON.stringify({ feedback: 'You understand the retry.', ...state });
+        let request = {};
+        const sandbox = (0, node_vm_1.createContext)({
+            exports: {},
+            require: (name) => name === 'vscode' ? { workspace: { getConfiguration: () => ({
+                        get: (key) => key === 'model' ? 'test-model' : false
+                    }) } } : name === './stream' ? { readReply: stream_1.readReply } : { assessmentFormat: review_1.assessmentFormat },
+            fetch: async (_url, init) => {
+                request = JSON.parse(init.body);
+                return new Response(JSON.stringify({ message: { content: structured }, done: true }) + '\n');
+            }
+        });
+        (0, node_vm_1.runInContext)((0, node_fs_1.readFileSync)((0, node_path_1.resolve)(__dirname, '../llm.js'), 'utf8'), sandbox);
+        const session = new session_1.Session({ label: 'Selected retry', sources: [{ name: 'retry.ts', content: 'retry();', language: 'typescript' }] });
+        const messages = session.messages(answer, 'test');
+        assert.ok(messages[1].content.includes('retry();'));
+        assert.ok(!messages[0].content.includes('Be a code tutor'));
+        const ask = sandbox.exports.askModel;
+        const raw = await ask(messages, new AbortController().signal, () => { }, true);
+        assert.deepEqual(request.format, review_1.assessmentFormat);
+        assert.equal(session.complete(answer, raw, 'test'), 'You understand the retry.');
+        assert.equal(session.assessment?.concepts[2].status, 'demonstrated');
+        assert.equal((0, review_1.parseAssessment)(structured, ['unrelated'])?.concepts[2].status, 'discussed');
+        await ask(messages, new AbortController().signal, () => { }, false);
+        assert.equal(request.format, undefined);
+    });
     (0, node_test_1.test)('only accepts demonstrated claims backed by exact developer quotes', () => {
         assert.equal((0, review_1.parseAssessment)(reply, [answer])?.concepts[2].status, 'demonstrated');
         assert.equal((0, review_1.parseAssessment)(reply, [])?.concepts[2].status, 'discussed');
         assert.equal((0, review_1.parseAssessment)(reply, ['An unrelated answer'])?.concepts[2].quote, undefined);
         assert.equal((0, review_1.parseAssessment)(reply.replace(answer, ''), [''])?.concepts[2].status, 'discussed');
+    });
+    (0, node_test_1.test)('credits a short purpose answer independently of three blank fields', () => {
+        const shortAnswer = 'a working calculator';
+        const submission = 'Understanding test answers for my current goal:\n\nPurpose:\n' + shortAnswer +
+            '\n\nBehavior:\nNot answered\n\nEffect:\nNot answered\n\nEdge cases:\nNot answered';
+        const session = new session_1.Session({ label: 'Calculator', sources: [] });
+        const result = JSON.stringify({ feedback: 'You identified its purpose.', concepts: review_1.conceptIds.map(id => ({
+                id, status: id === 'purpose' ? 'demonstrated' : 'unexplored', quote: id === 'purpose' ? shortAnswer : ''
+            })), uncertainties: [] });
+        session.complete(submission, result, 'test');
+        assert.equal(session.assessment?.concepts[0].status, 'demonstrated');
+        assert.equal(session.assessment?.concepts[0].quote, shortAnswer);
+        assert.ok(session.assessment?.concepts.slice(1).every(concept => concept.status === 'unexplored'));
     });
     (0, node_test_1.test)('short evidence is accepted without a character threshold; fabricated and blank evidence are rejected', () => {
         for (const quote of ['Retries', '空', 'same ID']) {
@@ -96,8 +164,10 @@ const reply = 'The retry can repeat a write. [[1:10-11]]\n<review-state>' + JSON
         session.complete('Different goal', reply, 'goal');
         assert.equal(session.assessment, undefined);
         session.complete(answer, reply, 'test');
-        session.complete('Try again', 'No metadata today.', 'test');
-        assert.equal(session.assessment, undefined);
+        const before = session.messages('Continue');
+        assert.throws(() => session.complete('Try again', 'No metadata today.', 'test'), /usable assessment/);
+        assert.deepEqual(session.assessment, state);
+        assert.deepEqual(session.messages('Continue'), before);
     });
     (0, node_test_1.test)('an empty explanation cannot commit history or evidence', () => {
         const session = new session_1.Session({ label: 'Test', sources: [] });
@@ -119,6 +189,7 @@ const reply = 'The retry can repeat a write. [[1:10-11]]\n<review-state>' + JSON
 });
 // Small DOM stand-in exercises actual panel event handlers without a model or VS Code.
 class Element {
+    tagName = 'DIV';
     children = [];
     parentElement;
     dataset = {};
@@ -165,6 +236,7 @@ class Element {
     scrollIntoView() { }
 }
 function panel() {
+    let waiting;
     const elements = new Map();
     const messages = [];
     let receive = () => { };
@@ -175,10 +247,12 @@ function panel() {
         return elements.get(id);
     };
     const sandbox = (0, node_vm_1.createContext)({
+        setInterval: (callback) => { waiting = callback; return 1; },
+        clearInterval: () => { waiting = undefined; },
         Node: { TEXT_NODE: 3 },
         document: {
             getElementById: get, querySelectorAll: () => [], addEventListener: () => { },
-            createElement: () => new Element(),
+            createElement: (tag) => Object.assign(new Element(), { tagName: tag.toUpperCase() }),
             createTextNode: (text) => Object.assign(new Element(), { textContent: text, nodeType: 3 })
         },
         window: { getSelection: () => null, addEventListener: (_, listener) => { receive = listener; } },
@@ -192,9 +266,70 @@ function panel() {
             sources: [{ name: 'retry.ts', content: 'const pending = request();\nreturn pending;', startLine: 10 }]
         } });
     const begin = () => { get('goal-input').value = 'Prevent duplicate writes.'; click('goal-form', 'submit'); };
-    return { get, emit, click, load, begin, messages, sandbox };
+    return { get, emit, click, load, begin, messages, sandbox, tick: () => waiting?.() };
 }
 (0, node_test_1.suite)('Discussion, test, and recap', () => {
+    (0, node_test_1.test)('waits for formatted completion and rotates helpful messages until success or error', () => {
+        const p = panel();
+        p.load();
+        p.begin();
+        assert.match(p.get('status').className, /thinking/);
+        p.emit({ type: 'chunk', text: '**raw partial' });
+        assert.equal(p.get('thread').children.length, 1);
+        p.tick();
+        assert.match(p.get('status').textContent, /complete response/);
+        p.emit({ type: 'reply', text: '**Ready**' });
+        assert.equal(p.get('thread').children.length, 2);
+        assert.equal(p.get('status').textContent, '');
+        assert.ok(!p.get('status').className.includes('thinking'));
+        p.tick();
+        assert.equal(p.get('status').textContent, '');
+        p.click('nav-test');
+        p.click('test-form', 'submit');
+        p.tick();
+        assert.match(p.get('status').textContent, /Short, informal/);
+        p.tick();
+        assert.match(p.get('status').textContent, /saved/);
+        p.emit({ type: 'error', text: 'Assessment unavailable. Retry.' });
+        p.tick();
+        assert.equal(p.get('status').textContent, 'Assessment unavailable. Retry.');
+        assert.ok(!p.get('status').className.includes('thinking'));
+        assert.equal(p.get('retry').hidden, false);
+    });
+    (0, node_test_1.test)('formats replies, feedback, and recaps safely while preserving references and literal code', () => {
+        const p = panel();
+        p.load();
+        p.begin();
+        const markdown = '# Main idea\n\n**Retry** with `request()` [[1:10-11]]\n\n- First\n- Second\n\n3. Third\n4. Fourth\n\n```js\n<img src=x onerror=alert(1)> [[1:10]]\n```\n\n<script>alert(1)</script>';
+        const descendants = (node) => [node, ...node.children.flatMap(descendants)];
+        const verify = (body) => {
+            const nodes = descendants(body);
+            assert.equal(nodes.filter(node => node.tagName === 'H3').length, 1);
+            assert.equal(nodes.filter(node => node.tagName === 'LI').length, 4);
+            assert.equal(nodes.find(node => node.tagName === 'OL')?.attributes.start, '3');
+            assert.ok(nodes.some(node => node.tagName === 'STRONG'));
+            assert.ok(nodes.some(node => node.tagName === 'CODE' && node.textContent === 'request()'));
+            assert.ok(nodes.some(node => node.tagName === 'CODE' && node.textContent === '<img src=x onerror=alert(1)> [[1:10]]'));
+            assert.ok(nodes.some(node => node.nodeType === 3 && node.textContent.includes('<script>alert(1)</script>')));
+            assert.equal(nodes.filter(node => node.tagName === 'SCRIPT' || node.tagName === 'IMG').length, 0);
+            const references = nodes.filter(node => node.className === 'reference');
+            assert.equal(references.length, 1);
+            references[0].listeners.click({ preventDefault() { } });
+            assert.equal(p.get('code-preview').children.length, 2);
+        };
+        p.emit({ type: 'chunk', text: '**Unfinished' });
+        p.emit({ type: 'reply', text: markdown });
+        assert.equal(p.get('thread').children.length, 2);
+        verify(p.get('thread').children[1]);
+        p.click('nav-test');
+        p.get('test-behavior').value = 'it tries again if it fails';
+        p.click('test-form', 'submit');
+        p.emit({ type: 'reply', text: markdown });
+        verify(p.get('test-feedback'));
+        p.click('recap');
+        p.emit({ type: 'reply', text: markdown });
+        verify(p.get('recap-body'));
+    });
     (0, node_test_1.test)('loading needs no inference; goal, discussion, recap, finish, and resume share the session', () => {
         const p = panel();
         assert.deepEqual(p.messages, [{ type: 'init' }]);
@@ -267,10 +402,7 @@ function panel() {
         p.get('test-effect').value = answer;
         p.click('test-form', 'submit');
         assert.equal(p.messages.at(-1)?.kind, 'test');
-        for (const area of ['Purpose', 'Behavior', 'Effect', 'Edge cases']) {
-            assert.ok(p.messages.at(-1)?.text?.includes(area + ':'));
-        }
-        assert.ok(p.messages.at(-1)?.text?.includes('Not answered'));
+        assert.deepEqual(JSON.parse(p.messages.at(-1).text), { purpose: '', behavior: '', effect: answer, edge: '' });
         p.emit({ type: 'reply', text: 'Effect is supported; purpose, behavior, and edge cases need work.', assessment: state });
         assert.equal(p.get('test-results').hidden, false);
         assert.equal(p.get('test-gaps').children.length, 3);

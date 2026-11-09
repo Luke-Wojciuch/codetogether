@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { askModel } from './llm';
 import { getStagedContext } from './git';
 import { CodeContext, Session } from './session';
-import { TurnKind, visibleReply } from './review';
+import { assessIndependently, TurnKind } from './review';
 
 export function activate(context: vscode.ExtensionContext) {
 	const snapshots = new Map<string, string>();
@@ -106,16 +106,14 @@ export function activate(context: vscode.ExtensionContext) {
 				if (JSON.stringify(current) !== JSON.stringify(session.context)) {
 					throw new Error('Code context changed. Start a new session to use the updated code.');
 				}
-				let accumulated = '';
-				let sent = '';
-				const reply = await askModel(session.messages(answer, kind), controller.signal, async text => {
-					accumulated += text;
-					const visible = visibleReply(accumulated);
-					if (!controller.signal.aborted && visible.length > sent.length) {
-						await post({ type: 'chunk', text: visible.slice(sent.length) });
-						sent = visible;
-					}
-				});
+				const activeSession = session;
+				const reply = kind === 'test' ? await assessIndependently(answer, async (areaAnswer, id) => {
+					const messages = activeSession.messages(id + ':\n' + areaAnswer, 'test');
+					messages[0].content += '\nAssess only the ' + id + ' area from the current answer. ' +
+						'The other areas are intentionally outside this request: mark them unexplored with empty quotes. ' +
+						'Feedback must address only ' + id + '; do not discuss or ask for other answers. Judge this answer independently of earlier tests.';
+					return askModel(messages, controller.signal, () => {}, true);
+				}) : await askModel(session.messages(answer, kind), controller.signal, () => {});
 				if (controller.signal.aborted) {
 					throw new Error('Request cancelled or timed out.');
 				}

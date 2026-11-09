@@ -12,8 +12,7 @@ let view = 'goal';
 let failed = false;
 let lastTurn;
 let draftMessage;
-let partialReply;
-let partialText;
+let waitTimer;
 let previewReference;
 let assessment;
 let recapText = '';
@@ -46,6 +45,8 @@ function setView(next) {
 }
 function setBusy(value) {
 	busy = value;
+	clearInterval(waitTimer);
+	byId('status').classList.toggle('thinking', value && !!context);
 	for (const id of ['begin', 'send', 'restart', 'edit-goal', 'ask-code', 'keep-studying', 'finish']) byId(id).disabled = value || !context;
 	byId('nav-goal').disabled = value;
 	byId('nav-discussion').disabled = value || !hasDiscussion;
@@ -64,6 +65,25 @@ function setBusy(value) {
 	byId('cancel').hidden = !value;
 	byId('retry').hidden = true;
 	byId('status').textContent = value ? (context ? 'Thinking through your code…' : 'Loading staged code…') : '';
+	if (value && context) {
+		const checking = lastTurn?.kind === 'test';
+		byId('status').textContent = checking ? 'Checking your understanding' : 'Thinking through your code';
+		const messages = checking ? [
+			'Your answers are being checked against the supplied code. Short, informal answers are enough.',
+			'This is taking a little longer. Your answers are saved in this panel.',
+			'You can cancel and retry without retyping your answers.',
+			'Still waiting for the model. Requests stop after two minutes; you can retry if needed.'
+		] : [
+			'Waiting for the complete response so it can be formatted for you.',
+			'While you wait, consider what you expect this code to do for a different input.',
+			'You can cancel and retry; your question will be preserved.',
+			'Still waiting for the model. Requests stop after two minutes; you can retry if needed.'
+		];
+		let step = 0;
+		waitTimer = setInterval(() => {
+			byId('status').textContent = messages[Math.min(step++, messages.length - 1)];
+		}, 20000);
+	}
 }
 function appendText(entry, text) {
 	let position = 0;
@@ -86,13 +106,81 @@ function appendText(entry, text) {
 	}
 	entry.append(document.createTextNode(text.slice(position)));
 }
+// A small Markdown subset, built with DOM nodes so model HTML is always literal text.
+function appendInline(entry, text) {
+	let position = 0;
+	for (const match of text.matchAll(/`([^`\n]+)`|\*\*([^*\n]+)\*\*/g)) {
+		appendText(entry, text.slice(position, match.index));
+		const element = document.createElement(match[1] !== undefined ? 'code' : 'strong');
+		if (match[1] !== undefined) element.textContent = match[1];
+		else appendText(element, match[2]);
+		entry.append(element);
+		position = match.index + match[0].length;
+	}
+	appendText(entry, text.slice(position));
+}
+function appendResponse(entry, text) {
+	entry.classList.toggle('response', true);
+	const lines = text.replace(/\r\n?/g, '\n').split('\n');
+	let paragraph;
+	let list;
+	for (let index = 0; index < lines.length; index++) {
+		const line = lines[index];
+		const fence = line.match(/^\s*(`{3,}|~{3,})[^`~]*$/);
+		if (fence) {
+			const code = document.createElement('code');
+			const contents = [];
+			while (++index < lines.length) {
+				const closing = lines[index].trim();
+				if (closing.length >= fence[1].length && [...closing].every(char => char === fence[1][0])) break;
+				contents.push(lines[index]);
+			}
+			code.textContent = contents.join('\n');
+			const pre = document.createElement('pre');
+			pre.append(code);
+			entry.append(pre);
+			paragraph = list = undefined;
+			continue;
+		}
+		if (!line.trim()) { paragraph = list = undefined; continue; }
+		const heading = line.match(/^#{1,6}\s+(.+)$/);
+		const item = line.match(/^\s*(?:[-+*]|(\d+)[.)])\s+(.+)$/);
+		if (heading) {
+			const title = document.createElement('h3');
+			appendInline(title, heading[1]);
+			entry.append(title);
+			paragraph = list = undefined;
+		} else if (item) {
+			const type = item[1] ? 'ol' : 'ul';
+			if (!list || list.tagName.toLowerCase() !== type) {
+				list = document.createElement(type);
+				if (item[1]) list.setAttribute('start', item[1]);
+				entry.append(list);
+			}
+			const row = document.createElement('li');
+			appendInline(row, item[2]);
+			list.append(row);
+			paragraph = undefined;
+		} else {
+			if (!paragraph) { paragraph = document.createElement('p'); entry.append(paragraph); }
+			else paragraph.append(document.createTextNode('\n'));
+			appendInline(paragraph, line);
+			list = undefined;
+		}
+	}
+}
 function addMessage(who, text) {
 	const entry = document.createElement('div');
 	entry.className = who === 'You' || who === 'Your goal' ? 'message user' : 'message';
 	const label = document.createElement('strong');
 	label.textContent = who;
 	entry.append(label);
-	appendText(entry, text);
+	if (who === 'You' || who === 'Your goal') appendText(entry, text);
+	else {
+		const body = document.createElement('div');
+		appendResponse(body, text);
+		entry.append(body);
+	}
 	byId('thread').append(entry);
 	entry.scrollIntoView({ block: 'nearest' });
 	return entry;
@@ -130,9 +218,6 @@ function renderAssessment() {
 	const description = assessment ? shown + ' of 4 areas supported by your test answers.' + (allChecksPassed() ? '' : ' You can finish with gaps recorded or get more help.') : 'No usable test assessment yet. You can finish with this uncertainty recorded or return to the discussion.';
 	byId('brain-description').textContent = description;
 	byId('progress-description').textContent = description + ' Passes reflect the model’s judgment of your reasoning, not proof of code correctness.';
-	const quotes = concepts.filter(concept => concept.quote).map(concept => concept.quote);
-	byId('quote-section').hidden = !quotes.length;
-	byId('evidence-quote').textContent = quotes.length ? '“' + quotes[quotes.length - 1] + '”' : '';
 	byId('uncertainties').replaceChildren();
 	const uncertainties = assessment?.uncertainties.length ? assessment.uncertainties : ['Other files, callers, and runtime behavior have not been checked.'];
 	for (const text of uncertainties) {
@@ -150,12 +235,13 @@ function resetTest() {
 }
 function renderTestResults(text) {
 	byId('test-feedback').replaceChildren();
-	appendText(byId('test-feedback'), text);
+	appendResponse(byId('test-feedback'), text);
 	byId('test-gaps').replaceChildren();
 	byId('test-summary').replaceChildren();
 	for (const id of Object.keys(topics)) {
 		const concept = assessment?.concepts.find(concept => concept.id === id);
 		const row = document.createElement('p');
+		if (concept?.status === 'demonstrated') row.className = 'demonstrated';
 		row.textContent = topics[id] + ': ' + (concept ? statuses[concept.status] : 'Not assessed');
 		byId('test-summary').append(row);
 		if (concept?.status === 'demonstrated') continue;
@@ -301,7 +387,6 @@ function start() {
 	failed = false;
 	lastTurn = undefined;
 	draftMessage = undefined;
-	partialReply = undefined;
 	previewReference = undefined;
 	assessment = undefined;
 	recapText = '';
@@ -369,8 +454,8 @@ byId('goal-form').addEventListener('submit', event => {
 byId('form').addEventListener('submit', event => { event.preventDefault(); send(input.value.trim()); });
 byId('test-form').addEventListener('submit', event => {
 	event.preventDefault();
-	const answers = Object.keys(topics).map(id => topics[id] + ':\n' + (byId('test-' + id).value.trim() || 'Not answered'));
-	send('Understanding test answers for my current goal:\n\n' + answers.join('\n\n'), 'test');
+	const answers = Object.fromEntries(Object.keys(topics).map(id => [id, byId('test-' + id).value.trim()]));
+	send(JSON.stringify(answers), 'test');
 });
 for (const id of ['test-understanding', 'nav-test']) byId(id).addEventListener('click', () => {
 	if (!busy && hasDiscussion) setView('test');
@@ -439,19 +524,7 @@ window.addEventListener('message', event => {
 		setBusy(false);
 		goalInput.focus();
 	}
-	if (message.type === 'chunk' && busy) {
-		if (lastTurn?.kind === 'test') { byId('status').textContent = 'Checking all four areas…'; return; }
-		if (!partialReply) {
-			partialReply = addMessage('CodeTogether', '');
-			partialText = document.createElement('span');
-			partialReply.append(partialText);
-		}
-		partialText.append(document.createTextNode(message.text));
-		byId('status').textContent = 'Receiving response…';
-	}
 	if (message.type === 'reply' && lastTurn) {
-		partialReply?.remove();
-		partialReply = undefined;
 		if (lastTurn.kind !== 'test') addMessage('CodeTogether', message.text);
 		draftMessage = undefined;
 		hasDiscussion = true;
@@ -465,7 +538,7 @@ window.addEventListener('message', event => {
 		if (lastTurn.kind === 'recap') {
 			recapText = message.text;
 			byId('recap-body').replaceChildren();
-			appendText(byId('recap-body'), recapText);
+			appendResponse(byId('recap-body'), recapText);
 			byId('recap-goal').textContent = goal;
 			byId('recap-title').textContent = 'Make sense of what you learned.';
 		} else recapText = '';
@@ -478,8 +551,6 @@ window.addEventListener('message', event => {
 		else input.focus();
 	}
 	if (message.type === 'error') {
-		partialReply?.remove();
-		partialReply = undefined;
 		draftMessage?.remove();
 		draftMessage = undefined;
 		failed = true;

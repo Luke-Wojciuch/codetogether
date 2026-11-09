@@ -36,7 +36,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.askModel = askModel;
 const vscode = __importStar(require("vscode"));
 const stream_1 = require("./stream");
-async function askModel(messages, signal, onText) {
+const review_1 = require("./review");
+async function askModel(messages, signal, onText, assess = false) {
     const config = vscode.workspace.getConfiguration('codetogether');
     const model = config.get('model');
     if (!model?.trim()) {
@@ -45,7 +46,8 @@ async function askModel(messages, signal, onText) {
     const response = await fetch('http://localhost:11434/api/chat', {
         method: 'POST', signal,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: model.trim(), stream: true, think: config.get('thinking', false), messages })
+        body: JSON.stringify({ model: model.trim(), stream: true, think: config.get('thinking', false), messages,
+            ...(assess ? { format: review_1.assessmentFormat, options: { temperature: 0 } } : {}) })
     }).catch(error => {
         if (signal.aborted) {
             throw error;
