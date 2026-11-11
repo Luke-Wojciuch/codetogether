@@ -33,21 +33,42 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.openAIApiKeySecret = void 0;
 exports.askModel = askModel;
 const vscode = __importStar(require("vscode"));
 const stream_1 = require("./stream");
-const review_1 = require("./review");
-async function askModel(messages, signal, onText, assess = false) {
+const assessment_1 = require("../review/assessment");
+const openai_1 = require("./openai");
+exports.openAIApiKeySecret = 'codetogether.openaiApiKey';
+async function askModel(messages, signal, onText, structured = false, secrets) {
     const config = vscode.workspace.getConfiguration('codetogether');
+    const provider = config.get('provider', 'ollama');
+    if (provider === 'openai') {
+        const model = config.get('openaiModel', 'gpt-5-mini').trim();
+        if (!model) {
+            throw new Error('Open CodeTogether: Settings and choose a model first.');
+        }
+        const apiKey = (await secrets?.get(exports.openAIApiKeySecret))?.trim();
+        if (!apiKey) {
+            throw new Error('Open CodeTogether: Settings and set an OpenAI API key first.');
+        }
+        if (signal.aborted) {
+            throw new Error('Request cancelled or timed out.');
+        }
+        return (0, openai_1.askOpenAI)(messages, model, apiKey, signal, onText, structured ? structured === true ? assessment_1.assessmentFormat : structured : undefined);
+    }
+    if (provider && provider !== 'ollama') {
+        throw new Error('Unknown model provider. Open CodeTogether: Settings.');
+    }
     const model = config.get('model');
     if (!model?.trim()) {
-        throw new Error('Run CodeTogether: Choose Model first.');
+        throw new Error('Open CodeTogether: Settings and choose a model first.');
     }
     const response = await fetch('http://localhost:11434/api/chat', {
         method: 'POST', signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: model.trim(), stream: true, think: config.get('thinking', false), messages,
-            ...(assess ? { format: review_1.assessmentFormat, options: { temperature: 0 } } : {}) })
+            ...(structured ? { format: structured === true ? assessment_1.assessmentFormat : structured, options: { temperature: 0 } } : {}) })
     }).catch(error => {
         if (signal.aborted) {
             throw error;

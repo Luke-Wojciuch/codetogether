@@ -1,4 +1,4 @@
-import { FileChange } from './session';
+import { FileChange } from '../review/session';
 
 // Used with --numstat -z --no-renames so paths (including tabs/newlines) stay literal.
 export function parseNumstat(output: string): FileChange[] {

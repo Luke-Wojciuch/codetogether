@@ -1,0 +1,22 @@
+#!/bin/sh
+# CodeTogether managed commit review gate v1
+set -eu
+
+git_dir=$(git rev-parse --absolute-git-dir) || exit 1
+tree=$(git write-tree) || exit 1
+head=$(git rev-parse --verify --quiet HEAD) || head=unborn
+approval_file="$git_dir/codetogether/approved-snapshot"
+
+if [ -f "$approval_file" ]; then
+  approved=$(cat "$approval_file") || exit 1
+  if [ "$approved" = "$head $tree" ]; then
+    exit 0
+  fi
+fi
+
+printf '%s\n' \
+  'CodeTogether: commit blocked; this staged snapshot has not been approved.' \
+  'In VS Code, run CodeTogether: Open Review to review ALL staged changes.' \
+  'Submit its quiz, open the recap, and choose Approve staged commit. Then retry the commit.' \
+  'Staging new changes or changing HEAD requires a new review.' >&2
+exit 1

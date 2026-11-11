@@ -36,19 +36,17 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getStagedContext = getStagedContext;
 const vscode = __importStar(require("vscode"));
 const path = __importStar(require("node:path"));
-const node_child_process_1 = require("node:child_process");
-const node_util_1 = require("node:util");
 const changes_1 = require("./changes");
-const run = (0, node_util_1.promisify)(node_child_process_1.execFile);
-async function getStagedContext(uri) {
-    const folder = uri ? vscode.workspace.getWorkspaceFolder(uri) : vscode.workspace.workspaceFolders?.[0];
-    if (!folder || (!uri && vscode.workspace.workspaceFolders?.length !== 1)) {
+const client_1 = require("./client");
+async function getStagedContext(uri, repositoryFolder) {
+    const folder = repositoryFolder ? vscode.workspace.getWorkspaceFolder(repositoryFolder)
+        : uri ? vscode.workspace.getWorkspaceFolder(uri) : vscode.workspace.workspaceFolders?.[0];
+    if (!folder || (!uri && !repositoryFolder && vscode.workspace.workspaceFolders?.length !== 1)) {
         throw new Error('Open one Git project, or start from a specific Source Control file.');
     }
-    const git = async (args) => (await run('git', args, {
-        cwd: folder.uri.fsPath, maxBuffer: 5 * 1024 * 1024, encoding: 'utf8', timeout: 10_000
-    })).stdout;
-    const root = (await git(['rev-parse', '--show-toplevel'])).trim();
+    const git = (args) => (0, client_1.git)(folder.uri.fsPath, args);
+    const before = await (0, client_1.stagedSnapshot)(folder.uri.fsPath, !uri);
+    const root = before.root;
     const scope = uri ? [path.relative(root, uri.fsPath).replace(/\\/g, '/')] : [];
     const diff = await git(['--literal-pathspecs', '-C', root, 'diff', '--cached', '--no-color', '--no-ext-diff', '--no-textconv', '--function-context', '--', ...scope]);
     if (!diff.trim()) {
@@ -68,6 +66,9 @@ async function getStagedContext(uri) {
             sources.push({ name, content, language: 'plaintext' });
         }
     }
-    return { label: 'Staged snapshot (not working-tree files); deleted/binary content may only appear in the diff', diff, sources, changes };
+    if (!(0, client_1.sameSnapshot)(before, await (0, client_1.stagedSnapshot)(root))) {
+        throw new Error('Staged changes changed while loading. Start a new review.');
+    }
+    return { label: 'Staged snapshot (not working-tree files); deleted/binary content may only appear in the diff', diff, sources, changes, staged: before };
 }
-//# sourceMappingURL=git.js.map
+//# sourceMappingURL=context.js.map

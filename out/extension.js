@@ -36,16 +36,31 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 const vscode = __importStar(require("vscode"));
 const node_crypto_1 = require("node:crypto");
-const llm_1 = require("./llm");
-const git_1 = require("./git");
-const session_1 = require("./session");
-const review_1 = require("./review");
+const llm_1 = require("./models/llm");
+const context_1 = require("./git/context");
+const session_1 = require("./review/session");
+const quiz_1 = require("./review/quiz");
+const assessment_1 = require("./prompts/assessment");
+const settings_1 = require("./commands/settings");
+const commitGate_1 = require("./git/commitGate");
 function activate(context) {
+    (0, settings_1.registerSettingsCommand)(context);
     const snapshots = new Map();
     context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('codetogether-snapshot', {
         provideTextDocumentContent: uri => snapshots.get(uri.toString()) ?? ''
     }));
     async function openReview(selectionMode = false, uri) {
+        const requireAllQuestions = () => vscode.workspace.getConfiguration('codetogether').get('requireAllQuizQuestions', false);
+        let repositoryFolder;
+        if (!selectionMode && !uri && (vscode.workspace.workspaceFolders?.length ?? 0) > 1) {
+            const selected = await vscode.window.showQuickPick(vscode.workspace.workspaceFolders.map(folder => ({
+                label: folder.name, description: folder.uri.fsPath, folder
+            })), { title: 'Choose the repository to review all staged changes' });
+            if (!selected) {
+                return;
+            }
+            repositoryFolder = selected.folder.uri;
+        }
         const editor = vscode.window.activeTextEditor;
         if (selectionMode && (!editor || editor.selection.isEmpty)) {
             void vscode.window.showInformationMessage('Select the code you want to work through first.');
@@ -56,7 +71,7 @@ function activate(context) {
         const selection = selectionMode ? editor.selection : undefined;
         const capture = async () => {
             if (!document || !selection) {
-                return (0, git_1.getStagedContext)(uri);
+                return (0, context_1.getStagedContext)(uri, repositoryFolder);
             }
             if (document.isClosed) {
                 throw new Error('The source document was closed. Start again from a selection.');
@@ -80,6 +95,11 @@ function activate(context) {
         let pending;
         const snapshotUris = [];
         const post = (message) => panel.webview.postMessage(message);
+        const policyListener = vscode.workspace.onDidChangeConfiguration(event => {
+            if (event.affectsConfiguration('codetogether.requireAllQuizQuestions')) {
+                void post({ type: 'commit-gate-policy', requireAllQuestions: requireAllQuestions() });
+            }
+        });
         const listener = panel.webview.onDidReceiveMessage(async (message) => {
             if (message?.type === 'cancel') {
                 pending?.abort();
@@ -105,6 +125,27 @@ function activate(context) {
             if (pending) {
                 return;
             }
+            if (message?.type === 'approve-commit') {
+                const controller = new AbortController();
+                pending = controller;
+                try {
+                    if (!vscode.workspace.isTrusted) {
+                        throw new Error('Trust this workspace before approving commits.');
+                    }
+                    if (!session || typeof message.answers !== 'string') {
+                        throw new Error('Load and submit a review quiz first.');
+                    }
+                    await (0, commitGate_1.approveStagedCommit)(session, message.answers, controller.signal, requireAllQuestions());
+                    await post({ type: 'commit-approved', text: 'This staged snapshot is approved. Retry your Git commit; no commit or push was made by CodeTogether.' });
+                }
+                catch (error) {
+                    await post({ type: 'commit-approval-error', text: error instanceof Error ? error.message : 'Could not approve this staged snapshot.' });
+                }
+                finally {
+                    pending = undefined;
+                }
+                return;
+            }
             if (message?.type === 'init') {
                 pending = new AbortController();
                 session = undefined;
@@ -114,7 +155,7 @@ function activate(context) {
                         throw new Error('Loading cancelled. Retry to load context.');
                     }
                     session = new session_1.Session(code);
-                    await post({ type: 'context', context: code });
+                    await post({ type: 'context', context: code, requireAllQuestions: requireAllQuestions() });
                 }
                 catch (error) {
                     await post({ type: 'error', text: error instanceof Error ? error.message : 'Could not load code.' });
@@ -128,7 +169,7 @@ function activate(context) {
                 return;
             }
             const answer = message.text.trim();
-            const kind = message.kind === 'goal' || message.kind === 'recap' || message.kind === 'test' ? message.kind : 'discussion';
+            const kind = message.kind === 'goal' || message.kind === 'recap' || message.kind === 'test' || message.kind === 'quiz' ? message.kind : 'discussion';
             const controller = new AbortController();
             pending = controller;
             const timeout = setTimeout(() => controller.abort(), 120_000);
@@ -144,13 +185,26 @@ function activate(context) {
                     throw new Error('Code context changed. Start a new session to use the updated code.');
                 }
                 const activeSession = session;
-                const reply = kind === 'test' ? await (0, review_1.assessIndependently)(answer, async (areaAnswer, id) => {
-                    const messages = activeSession.messages(id + ':\n' + areaAnswer, 'test');
-                    messages[0].content += '\nAssess only the ' + id + ' area from the current answer. ' +
-                        'The other areas are intentionally outside this request: mark them unexplored with empty quotes. ' +
-                        'Feedback must address only ' + id + '; do not discuss or ask for other answers. Judge this answer independently of earlier tests.';
-                    return (0, llm_1.askModel)(messages, controller.signal, () => { }, true);
-                }) : await (0, llm_1.askModel)(session.messages(answer, kind), controller.signal, () => { });
+                if (kind === 'quiz') {
+                    const raw = await (0, llm_1.askModel)(session.messages(answer, 'quiz'), controller.signal, () => { }, quiz_1.quizFormat, context.secrets);
+                    if (controller.signal.aborted) {
+                        throw new Error('Request cancelled or timed out.');
+                    }
+                    const quiz = session.setQuiz(answer, raw);
+                    await post({ type: 'quiz', ...quiz });
+                    return;
+                }
+                if (kind === 'test') {
+                    if (!session.quiz) {
+                        throw new Error('Generate a review quiz before submitting answers.');
+                    }
+                    (0, quiz_1.requireQuizAnswers)(answer, session.quiz.questions);
+                }
+                const reply = kind === 'test' ? await (0, quiz_1.assessQuiz)(activeSession.quiz, answer, async (question, areaAnswer) => {
+                    const messages = activeSession.messages(JSON.stringify({ goal: activeSession.quiz.goal, question, answer: areaAnswer }), 'test');
+                    messages[0].content = assessment_1.quizAssessmentInstructions + '\nRequired JSON schema: ' + JSON.stringify(quiz_1.quizAssessmentFormat);
+                    return (0, llm_1.askModel)(messages, controller.signal, () => { }, quiz_1.quizAssessmentFormat, context.secrets);
+                }) : await (0, llm_1.askModel)(session.messages(answer, kind), controller.signal, () => { }, false, context.secrets);
                 if (controller.signal.aborted) {
                     throw new Error('Request cancelled or timed out.');
                 }
@@ -161,7 +215,7 @@ function activate(context) {
                 await post({
                     type: 'error',
                     text: controller.signal.aborted ? 'Request cancelled or timed out. You can retry.' :
-                        error instanceof Error ? error.message : 'Could not connect to Ollama. Check that it is running.'
+                        error instanceof Error ? error.message : 'Could not connect to the model provider. Check your model configuration.'
                 });
             }
             finally {
@@ -172,6 +226,7 @@ function activate(context) {
         panel.onDidDispose(() => {
             pending?.abort();
             listener.dispose();
+            policyListener.dispose();
             for (const uri of snapshotUris) {
                 snapshots.delete(uri);
             }
@@ -187,15 +242,6 @@ function activate(context) {
     for (const id of ['codetogether.openReview', 'codetogether.explainChanges']) {
         context.subscriptions.push(vscode.commands.registerCommand(id, (resource) => openReview(false, resource instanceof vscode.Uri ? resource : resource?.resourceUri)));
     }
-    context.subscriptions.push(vscode.commands.registerCommand('codetogether.understandCode', () => openReview(true)), vscode.commands.registerCommand('codetogether.helloWorld', () => vscode.window.showInformationMessage('CodeTogether is running!')), vscode.commands.registerCommand('codetogether.chooseModel', async () => {
-        const config = vscode.workspace.getConfiguration('codetogether');
-        const model = await vscode.window.showInputBox({
-            title: 'Choose your Ollama model', prompt: 'Enter an exact model name from ollama list',
-            value: config.get('model') ?? ''
-        });
-        if (model?.trim()) {
-            await config.update('model', model.trim(), vscode.ConfigurationTarget.Global);
-        }
-    }));
+    context.subscriptions.push(vscode.commands.registerCommand('codetogether.understandCode', () => openReview(true)));
 }
 //# sourceMappingURL=extension.js.map

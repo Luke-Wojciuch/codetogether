@@ -1,8 +1,8 @@
 import * as assert from 'node:assert/strict';
 import { suite, test } from 'node:test';
-import { Session, CodeContext } from '../session';
-import { readReply } from '../stream';
-import { parseNumstat } from '../changes';
+import { Session, CodeContext } from '../review/session';
+import { readReply } from '../models/stream';
+import { parseNumstat } from '../git/changes';
 
 const code: CodeContext = {
 	label: 'Selected code', sources: [{

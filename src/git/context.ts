@@ -1,21 +1,18 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { CodeContext } from './session';
+import { CodeContext } from '../review/session';
 import { parseNumstat } from './changes';
+import { git as runGit, sameSnapshot, stagedSnapshot } from './client';
 
-const run = promisify(execFile);
-
-export async function getStagedContext(uri?: vscode.Uri): Promise<CodeContext> {
-	const folder = uri ? vscode.workspace.getWorkspaceFolder(uri) : vscode.workspace.workspaceFolders?.[0];
-	if (!folder || (!uri && vscode.workspace.workspaceFolders?.length !== 1)) {
+export async function getStagedContext(uri?: vscode.Uri, repositoryFolder?: vscode.Uri): Promise<CodeContext> {
+	const folder = repositoryFolder ? vscode.workspace.getWorkspaceFolder(repositoryFolder)
+		: uri ? vscode.workspace.getWorkspaceFolder(uri) : vscode.workspace.workspaceFolders?.[0];
+	if (!folder || (!uri && !repositoryFolder && vscode.workspace.workspaceFolders?.length !== 1)) {
 		throw new Error('Open one Git project, or start from a specific Source Control file.');
 	}
-	const git = async (args: string[]) => (await run('git', args, {
-		cwd: folder.uri.fsPath, maxBuffer: 5 * 1024 * 1024, encoding: 'utf8', timeout: 10_000
-	})).stdout;
-	const root = (await git(['rev-parse', '--show-toplevel'])).trim();
+	const git = (args: string[]) => runGit(folder.uri.fsPath, args);
+	const before = await stagedSnapshot(folder.uri.fsPath, !uri);
+	const root = before.root;
 	const scope = uri ? [path.relative(root, uri.fsPath).replace(/\\/g, '/')] : [];
 	const diff = await git(['--literal-pathspecs', '-C', root, 'diff', '--cached', '--no-color', '--no-ext-diff', '--no-textconv', '--function-context', '--', ...scope]);
 	if (!diff.trim()) {
@@ -35,5 +32,8 @@ export async function getStagedContext(uri?: vscode.Uri): Promise<CodeContext> {
 			sources.push({ name, content, language: 'plaintext' });
 		}
 	}
-	return { label: 'Staged snapshot (not working-tree files); deleted/binary content may only appear in the diff', diff, sources, changes };
+	if (!sameSnapshot(before, await stagedSnapshot(root))) {
+		throw new Error('Staged changes changed while loading. Start a new review.');
+	}
+	return { label: 'Staged snapshot (not working-tree files); deleted/binary content may only appear in the diff', diff, sources, changes, staged: before };
 }

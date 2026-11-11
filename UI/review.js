@@ -17,9 +17,21 @@ let previewReference;
 let assessment;
 let recapText = '';
 let finished = false;
+let quizQuestions = [];
+let quizSubmission;
+let approvingCommit = false;
+let commitApproved = false;
+let commitGateMessage = '';
+let requireAllQuestions = false;
 
+function reviewedTopicIds() {
+	return quizQuestions.length ? quizQuestions.map(question => question.id) : Object.keys(topics);
+}
+function questionCountLabel(count) {
+	return count + (count === 1 ? ' question' : ' questions');
+}
 function allChecksPassed() {
-	return Object.keys(topics).every(id => assessment?.concepts?.some(concept =>
+	return reviewedTopicIds().every(id => assessment?.concepts?.some(concept =>
 		concept.id === id && concept.status === 'demonstrated'));
 }
 
@@ -36,28 +48,34 @@ function setView(next) {
 	if (next === 'discussion') input.focus();
 	if (next === 'test') {
 		byId('test-goal').textContent = goal;
+		renderQuizProgress();
 		byId('test-title').focus();
 	}
 	if (next === 'recap') {
 		byId('recap-title').setAttribute('tabindex', '-1');
 		byId('recap-title').focus();
 	}
+	renderCommitGate();
 }
 function setBusy(value) {
 	busy = value;
 	clearInterval(waitTimer);
 	byId('status').classList.toggle('thinking', value && !!context);
-	for (const id of ['begin', 'send', 'restart', 'edit-goal', 'ask-code', 'keep-studying', 'finish']) byId(id).disabled = value || !context;
+	for (const id of ['begin', 'begin-quiz', 'send', 'restart', 'edit-goal', 'ask-code', 'keep-studying', 'finish']) byId(id).disabled = value || !context;
 	byId('nav-goal').disabled = value;
 	byId('nav-discussion').disabled = value || !hasDiscussion;
-	byId('nav-recap').disabled = value || !hasDiscussion;
+	byId('nav-recap').disabled = value || !hasDiscussion || (quizQuestions.length > 0 && !quizComplete());
 	byId('nav-test').disabled = value || !hasDiscussion;
 	byId('test-understanding').disabled = value || !hasDiscussion;
 	for (const id of ['check-understanding', 'back-to-talk']) byId(id).disabled = value || !hasDiscussion;
-	for (const id of Object.keys(topics)) byId('test-' + id).disabled = value;
+	for (const id of Object.keys(topics)) {
+		const inactive = !quizQuestions.some(question => question.id === id);
+		byId('test-' + id).disabled = value || inactive;
+		byId('not-sure-' + id).disabled = value || inactive;
+	}
 	for (const button of byId('test-gaps').children) button.disabled = value;
-	byId('recap').disabled = value || !hasDiscussion;
-	byId('finish').disabled = value || !context || finished;
+	byId('recap').disabled = value || !hasDiscussion || (quizQuestions.length > 0 && !quizComplete());
+	byId('finish').disabled = value || !context || finished || (quizQuestions.length > 0 && !quizComplete());
 	byId('finish').title = 'Finish with any remaining gaps recorded';
 	for (const button of document.querySelectorAll('[data-goal], [data-question]')) button.disabled = value || !context;
 	input.disabled = value;
@@ -67,11 +85,17 @@ function setBusy(value) {
 	byId('status').textContent = value ? (context ? 'Thinking through your code…' : 'Loading staged code…') : '';
 	if (value && context) {
 		const checking = lastTurn?.kind === 'test';
-		byId('status').textContent = checking ? 'Checking your understanding' : 'Thinking through your code';
+		const generating = lastTurn?.kind === 'quiz';
+		byId('status').textContent = generating ? 'Preparing your code review quiz' : checking ? 'Checking your understanding' : 'Thinking through your code';
 		const messages = checking ? [
 			'Your answers are being checked against the supplied code. Short, informal answers are enough.',
 			'This is taking a little longer. Your answers are saved in this panel.',
 			'You can cancel and retry without retyping your answers.',
+			'Still waiting for the model. Requests stop after two minutes; you can retry if needed.'
+		] : generating ? [
+			'Creating a short quiz to match the complexity of your code and goal.',
+			'You will answer the questions before receiving feedback.',
+			'You can cancel and retry if question generation takes too long.',
 			'Still waiting for the model. Requests stop after two minutes; you can retry if needed.'
 		] : [
 			'Waiting for the complete response so it can be formatted for you.',
@@ -84,6 +108,7 @@ function setBusy(value) {
 			byId('status').textContent = messages[Math.min(step++, messages.length - 1)];
 		}, 20000);
 	}
+	renderQuizProgress();
 }
 function appendText(entry, text) {
 	let position = 0;
@@ -188,7 +213,7 @@ function addMessage(who, text) {
 function renderAssessment() {
 	byId('concept-nav').replaceChildren();
 	byId('concepts').replaceChildren();
-	const concepts = assessment?.concepts ?? Object.keys(topics).map(id => ({ id, status: 'unexplored' }));
+	const concepts = reviewedTopicIds().map(id => assessment?.concepts.find(concept => concept.id === id) ?? { id, status: 'unexplored' });
 	for (const concept of concepts) {
 		const topic = document.createElement('div');
 		topic.className = 'concept-topic ' + concept.status;
@@ -213,9 +238,10 @@ function renderAssessment() {
 		byId('concepts').append(row);
 	}
 	const shown = concepts.filter(concept => concept.status === 'demonstrated').length;
-	byId('brain-fill').setAttribute('y', String(112 - shown * 28));
-	byId('brain-fill').setAttribute('height', String(shown * 28));
-	const description = assessment ? shown + ' of 4 areas supported by your test answers.' + (allChecksPassed() ? '' : ' You can finish with gaps recorded or get more help.') : 'No usable test assessment yet. You can finish with this uncertainty recorded or return to the discussion.';
+	const fill = Math.round(112 * shown / concepts.length);
+	byId('brain-fill').setAttribute('y', String(112 - fill));
+	byId('brain-fill').setAttribute('height', String(fill));
+	const description = assessment ? shown + ' of ' + concepts.length + ' areas supported by your answers.' + (allChecksPassed() ? '' : ' You can finish with gaps recorded or get more help.') : 'No usable assessment yet. You can finish with this uncertainty recorded or return to the discussion.';
 	byId('brain-description').textContent = description;
 	byId('progress-description').textContent = description + ' Passes reflect the model’s judgment of your reasoning, not proof of code correctness.';
 	byId('uncertainties').replaceChildren();
@@ -227,18 +253,80 @@ function renderAssessment() {
 	}
 }
 function resetTest() {
-	for (const id of Object.keys(topics)) byId('test-' + id).value = '';
+	quizQuestions = [];
+	quizSubmission = undefined;
+	for (const id of Object.keys(topics)) {
+		byId('test-' + id).value = '';
+		byId('test-' + id).disabled = true;
+		byId('quiz-question-' + id).hidden = true;
+		byId('question-' + id).textContent = '';
+		byId('question-reference-' + id).replaceChildren();
+	}
+	byId('quiz-heading').textContent = 'Review quiz';
 	byId('test-results').hidden = true;
 	byId('test-feedback').replaceChildren();
 	byId('test-summary').replaceChildren();
 	byId('test-gaps').replaceChildren();
+	byId('test-form').hidden = true;
+	byId('quiz-loading').hidden = false;
+	renderQuizProgress();
+}
+function quizAnswers() {
+	return Object.fromEntries(quizQuestions.map(question => [question.id, byId('test-' + question.id).value.trim()]));
+}
+function quizComplete() {
+	return !!assessment && quizSubmission === JSON.stringify(quizAnswers());
+}
+function renderCommitGate() {
+	const available = !!context?.staged?.allStaged;
+	const strictGap = requireAllQuestions && quizComplete() && !allChecksPassed();
+	const button = byId('approve-commit');
+	button.hidden = !available;
+	button.disabled = !available || busy || view !== 'recap' || !quizComplete() || strictGap || commitApproved;
+	button.textContent = approvingCommit ? 'Approving staged snapshot…' : commitApproved ? 'Staged snapshot approved' : 'Approve staged commit';
+	byId('commit-gate-note').hidden = !available;
+	byId('commit-gate-note').textContent = commitGateMessage || (strictGap
+		? 'Strict commit approval is on: every question must show understanding. Use the help buttons, revise your answers, and submit the quiz again.'
+		: requireAllQuestions
+			? 'Strict commit approval is on. Enable the commit review gate in CodeTogether: Settings, then submit the quiz for all staged changes. Approval does not run Git commit.'
+			: 'Submit every question to approve this staged snapshot. Recorded gaps are allowed. Enable the commit review gate in CodeTogether: Settings; approval does not run Git commit. Turn on Require all quiz questions there for strict approval.');
+}
+function renderQuizProgress() {
+	const answers = quizAnswers();
+	const completed = Object.values(answers).filter(Boolean).length;
+	const count = quizQuestions.length;
+	byId('quiz-progress').max = count || 1;
+	byId('quiz-progress').value = completed;
+	byId('quiz-progress-text').textContent = count ? completed + ' of ' + questionCountLabel(count) + ' completed' : 'Preparing your quiz…';
+	byId('check-understanding').disabled = busy || !count || completed !== count;
+	if (quizQuestions.length) {
+		const incomplete = !quizComplete();
+		byId('nav-recap').disabled = busy || incomplete;
+		byId('recap').disabled = busy || incomplete;
+		byId('finish').disabled = busy || finished || incomplete;
+	}
+	byId('quiz-result-note').textContent = quizSubmission && !quizComplete()
+		? 'Your answers have changed. Submit the quiz again to update the feedback.'
+		: quizSubmission ? (count === 1 ? 'The question has a response.' : 'All ' + count + ' questions have a response.') + ' Any gaps are recorded below.' : '';
+	renderCommitGate();
+}
+function openQuiz(fromGoal = false) {
+	if (busy || !context) return;
+	const quizGoal = fromGoal ? goalInput.value.trim() : goal;
+	if (!quizGoal) {
+		setView('goal');
+		byId('status').textContent = 'Add a goal so the quiz can focus on what you want to understand.';
+		return;
+	}
+	if (quizQuestions.length && quizGoal === goal) setView('test');
+	else send(quizGoal, 'quiz');
 }
 function renderTestResults(text) {
 	byId('test-feedback').replaceChildren();
 	appendResponse(byId('test-feedback'), text);
 	byId('test-gaps').replaceChildren();
 	byId('test-summary').replaceChildren();
-	for (const id of Object.keys(topics)) {
+	for (const id of reviewedTopicIds()) {
 		const concept = assessment?.concepts.find(concept => concept.id === id);
 		const row = document.createElement('p');
 		if (concept?.status === 'demonstrated') row.className = 'demonstrated';
@@ -382,6 +470,9 @@ function renderFiles() {
 
 function start() {
 	context = undefined;
+	approvingCommit = false;
+	commitApproved = false;
+	commitGateMessage = '';
 	goal = '';
 	hasDiscussion = false;
 	failed = false;
@@ -416,15 +507,20 @@ function send(text, kind = 'discussion') {
 	finished = false;
 	byId('finished-note').hidden = true;
 	byId('finish').textContent = 'Finish review';
-	setView(kind === 'test' ? 'test' : kind === 'recap' ? 'recap' : 'discussion');
+	setView(kind === 'test' || kind === 'quiz' ? 'test' : kind === 'recap' ? 'recap' : 'discussion');
 	byId('current-goal').textContent = kind === 'goal' ? text : goal;
-	draftMessage = kind === 'recap' || kind === 'test' ? undefined : addMessage(kind === 'goal' ? 'Your goal' : 'You', text);
+	draftMessage = kind === 'recap' || kind === 'test' || kind === 'quiz' ? undefined : addMessage(kind === 'goal' ? 'Your goal' : 'You', text);
 	if (kind === 'test') byId('test-results').hidden = true;
 	setBusy(true);
 	vscode.postMessage({ type: 'send', ...lastTurn });
 }
 function openRecap() {
 	if (busy || !hasDiscussion) return;
+	if (quizQuestions.length && !quizComplete()) {
+		setView('test');
+		byId('status').textContent = 'Respond to each question and submit the quiz before continuing to the recap.';
+		return;
+	}
 	if (recapText) { setView('recap'); return; }
 	send('Recap my goal, the latest test results with evidence from my answers, and any gaps or uncertainties. If no usable test assessment exists, say so. I may finish with gaps recorded. Do not ask further reasoning questions.', 'recap');
 }
@@ -454,11 +550,27 @@ byId('goal-form').addEventListener('submit', event => {
 byId('form').addEventListener('submit', event => { event.preventDefault(); send(input.value.trim()); });
 byId('test-form').addEventListener('submit', event => {
 	event.preventDefault();
-	const answers = Object.fromEntries(Object.keys(topics).map(id => [id, byId('test-' + id).value.trim()]));
+	const answers = quizAnswers();
+	if (busy || !quizQuestions.length) return;
+	const missing = quizQuestions.map(question => question.id).find(id => !answers[id]);
+	if (missing) {
+		byId('test-' + missing).focus();
+		byId('status').textContent = 'Respond to each question, or choose “I\u2019m not sure” to record a gap.';
+		return;
+	}
 	send(JSON.stringify(answers), 'test');
 });
+byId('begin-quiz').addEventListener('click', () => openQuiz(true));
+for (const id of Object.keys(topics)) {
+	byId('test-' + id).addEventListener('input', renderQuizProgress);
+	byId('not-sure-' + id).addEventListener('click', () => {
+		if (busy || !quizQuestions.some(question => question.id === id)) return;
+		byId('test-' + id).value = "I'm not sure yet.";
+		renderQuizProgress();
+	});
+}
 for (const id of ['test-understanding', 'nav-test']) byId(id).addEventListener('click', () => {
-	if (!busy && hasDiscussion) setView('test');
+	if (!busy && hasDiscussion) openQuiz();
 });
 byId('back-to-talk').addEventListener('click', () => { if (!busy) setView('discussion'); });
 for (const [field, form] of [[input, byId('form')], [goalInput, byId('goal-form')]]) {
@@ -501,12 +613,20 @@ byId('keep-studying').addEventListener('click', () => {
 	setView('discussion');
 });
 byId('finish').addEventListener('click', () => {
-	if (busy || !context || finished || view !== 'recap') return;
+	if (busy || !context || finished || view !== 'recap' || (quizQuestions.length && !quizComplete())) return;
 	finished = true;
 	byId('finished-note').textContent = allChecksPassed() ? 'Review finished. No commit or push was made.' : 'Review finished with gaps or unassessed understanding recorded above. No commit or push was made.';
 	byId('finished-note').hidden = false;
 	byId('finish').textContent = 'Review finished';
 	byId('finish').disabled = true;
+});
+byId('approve-commit').addEventListener('click', () => {
+	if (busy || !context?.staged?.allStaged || view !== 'recap' || !quizComplete() || (requireAllQuestions && !allChecksPassed()) || commitApproved) return;
+	approvingCommit = true;
+	setBusy(true);
+	byId('cancel').hidden = true;
+	byId('status').textContent = 'Checking the current staged snapshot before recording approval…';
+	vscode.postMessage({ type: 'approve-commit', answers: JSON.stringify(quizAnswers()) });
 });
 byId('cancel').addEventListener('click', () => { vscode.postMessage({ type: 'cancel' }); byId('status').textContent = 'Cancelling…'; });
 byId('retry').addEventListener('click', () => {
@@ -515,14 +635,58 @@ byId('retry').addEventListener('click', () => {
 });
 window.addEventListener('message', event => {
 	const message = event.data;
+	if ((message.type === 'commit-approved' || message.type === 'commit-approval-error') && approvingCommit) {
+		approvingCommit = false;
+		commitApproved = message.type === 'commit-approved';
+		commitGateMessage = message.text;
+		setBusy(false);
+		byId('status').textContent = message.text;
+	}
 	if (message.type === 'context') {
 		context = message.context;
+		requireAllQuestions = message.requireAllQuestions === true;
 		byId('scope').textContent = context.label;
 		renderFiles();
 		byId('diff').textContent = context.diff ?? '';
 		byId('diff').hidden = !context.diff;
 		setBusy(false);
 		goalInput.focus();
+	}
+	if (message.type === 'commit-gate-policy') {
+		requireAllQuestions = message.requireAllQuestions === true;
+		renderCommitGate();
+	}
+	if (message.type === 'quiz' && lastTurn?.kind === 'quiz') {
+		resetTest();
+		quizQuestions = message.questions;
+		goal = message.goal;
+		goalInput.value = goal;
+		byId('current-goal').textContent = goal;
+		hasDiscussion = true;
+		assessment = undefined;
+		recapText = '';
+		byId('quiz-heading').textContent = 'Review quiz · ' + questionCountLabel(quizQuestions.length);
+		for (const [index, question] of quizQuestions.entries()) {
+			byId('quiz-question-' + question.id).hidden = false;
+			byId('question-heading-' + question.id).textContent = 'Question ' + (index + 1) + ' · ' + topics[question.id];
+			byId('question-' + question.id).textContent = question.prompt;
+			const reference = byId('question-reference-' + question.id);
+			reference.replaceChildren();
+			if (question.sourceId) appendText(reference, '[[' + question.sourceId + ':' + question.line + '-' + question.endLine + ']]');
+			else {
+				const browse = document.createElement('button');
+				browse.type = 'button';
+				browse.className = 'secondary';
+				browse.textContent = 'Browse supplied code';
+				browse.addEventListener('click', browseCode);
+				reference.append(browse);
+			}
+		}
+		byId('quiz-loading').hidden = true;
+		byId('test-form').hidden = false;
+		renderAssessment();
+		setBusy(false);
+		setView('test');
 	}
 	if (message.type === 'reply' && lastTurn) {
 		if (lastTurn.kind !== 'test') addMessage('CodeTogether', message.text);
@@ -542,7 +706,11 @@ window.addEventListener('message', event => {
 			byId('recap-goal').textContent = goal;
 			byId('recap-title').textContent = 'Make sense of what you learned.';
 		} else recapText = '';
-		if (lastTurn.kind === 'test') renderTestResults(message.text);
+		if (lastTurn.kind === 'test') {
+			quizSubmission = lastTurn.text;
+			commitGateMessage = '';
+			renderTestResults(message.text);
+		}
 		if (lastTurn.kind === 'discussion' && input.value.trim() === lastTurn.text) input.value = '';
 		renderAssessment();
 		setBusy(false);
@@ -555,6 +723,7 @@ window.addEventListener('message', event => {
 		draftMessage = undefined;
 		failed = true;
 		if (lastTurn?.kind === 'goal') setView('goal');
+		if (lastTurn?.kind === 'test' && assessment) byId('test-results').hidden = false;
 		setBusy(false);
 		byId('status').textContent = message.text;
 		byId('retry').hidden = false;

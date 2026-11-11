@@ -16,6 +16,19 @@
     "configuration": {
   "title": "CodeTogether",
   "properties": {
+    "codetogether.provider": {
+      "type": "string",
+      "enum": ["ollama", "openai"],
+      "default": "ollama",
+      "scope": "application",
+      "description": "Model provider. OpenAI sends supplied code and conversation to the cloud API and may incur usage charges."
+    },
+    "codetogether.openaiModel": {
+      "type": "string",
+      "default": "gpt-5-mini",
+      "scope": "application",
+      "description": "OpenAI API model ID supporting Responses and structured outputs. Set the API key through CodeTogether: Settings, not in this setting."
+    },
     "codetogether.model": {
       "type": "string",
       "default": "",
@@ -24,37 +37,22 @@
     "codetogether.thinking": {
       "type": "boolean",
       "default": false,
-      "description": "Enable thinking for models that support it. May improve reasoning but delay the visible answer. Models with mandatory thinking may ignore this setting."
+      "description": "Ollama only: enable thinking for models that support it. May improve reasoning but delay the visible answer. Models with mandatory thinking may ignore this setting."
+    },
+    "codetogether.requireAllQuizQuestions": {
+      "type": "boolean",
+      "default": false,
+      "scope": "application",
+      "description": "Optional strict commit approval stored in user settings: require every generated review quiz question to show understanding. When off, submitted quizzes may be approved with recorded gaps. Applies to new approvals."
     }
   }
 },
 
-    "commands": [ 
-      
-      {
-        "command": "codetogether.helloWorld",
-        "title": "Hello World"
-      }, 
-      
-      {
-      "command": "codetogether.explainChanges",
-      "title": "CodeTogether: Understand This Change"
-    },
-
-    {
-      "command": "codetogether.openReview",
-      "title": "CodeTogether: Open Review"
-    },
-
-    {
-      "command": "codetogether.understandCode",
-      "title": "CodeTogether: Understand This Code"
-    },
-    {
-      "command": "codetogether.chooseModel",
-      "title": "CodeTogether: Choose Model"
-    }
-
+    "commands": [
+      { "command": "codetogether.settings", "title": "CodeTogether: Settings" },
+      { "command": "codetogether.openReview", "title": "CodeTogether: Open Review" },
+      { "command": "codetogether.explainChanges", "title": "CodeTogether: Understand This Change" },
+      { "command": "codetogether.understandCode", "title": "CodeTogether: Understand This Code" }
     ],
     "menus": {
       "editor/context": [
@@ -71,7 +69,7 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "node --test out/test/extension.test.js out/test/review.test.js"
+    "test": "node --test out/test/extension.test.js out/test/review.test.js out/test/llm.test.js out/test/commitGate.test.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.140.0",

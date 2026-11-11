@@ -12,8 +12,8 @@
 <header class="header"><span class="wordmark">CodeTogether</span><div class="header-actions"><span id="review-kind" class="eyebrow">Code review</span><button id="restart" class="text-button" type="button">New review</button></div></header>
 <nav class="steps" aria-label="Review steps">
 <button id="nav-goal" type="button" aria-current="step"><span>01</span> Your goal</button>
-<button id="nav-discussion" type="button" disabled><span>02</span> Talk it through</button>
-<button id="nav-test" type="button" disabled><span>03</span> Check understanding</button>
+<button id="nav-discussion" type="button" disabled><span>02</span> Tutor</button>
+<button id="nav-test" type="button" disabled><span>03</span> Review quiz</button>
 <button id="nav-recap" type="button" disabled><span>04</span> Recap</button>
 </nav>
 <section id="goal-view" class="view" aria-labelledby="goal-title">
@@ -31,7 +31,8 @@
 <div class="section-heading"><h2>In this review</h2><span id="snapshot-kind" class="eyebrow">Staged snapshot</span></div>
 <div id="sources"></div>
 <details class="scope"><summary>Scope &amp; diff</summary><p id="scope" class="muted">Loading…</p><pre id="diff" hidden></pre><p class="muted">Only supplied code is included. Callers, other files, and runtime behavior have not been checked.</p></details>
-<div class="footer"><button id="begin" class="primary wide" type="submit">Begin review <span aria-hidden="true">→</span></button></div>
+<div class="footer mode-actions"><button id="begin" type="submit">Start tutor</button><button id="begin-quiz" class="primary" type="button">Start review quiz →</button></div>
+<p class="muted">Explore with the tutor, or go straight to a short quiz tailored to this code and your goal.</p>
 </form>
 </section>
 <section id="discussion-view" class="view" hidden aria-label="Talk it through">
@@ -48,29 +49,33 @@
 <form id="form" class="composer">
 <label id="input-label" for="input">Ask, share your reasoning, or push back</label>
 <div class="reply-row"><textarea id="input" placeholder="What is unclear, or how do you think it works?" required></textarea><button id="send" class="primary" type="submit">Send</button></div>
-<div class="composer-meta"><span class="muted">Ctrl/Cmd + Enter to send</span><button id="test-understanding" class="text-button" type="button">Check understanding →</button></div>
+<div class="composer-meta"><span class="muted">Ctrl/Cmd + Enter to send</span><button id="test-understanding" class="text-button" type="button">Review quiz →</button></div>
 </form>
 </section>
 <section id="test-view" class="view" hidden aria-labelledby="test-title">
-<h1 id="test-title" tabindex="-1">Check your understanding.</h1>
-<p class="intro">Share your understanding of the code and goal you discussed. Short, informal answers are fine; a broadly correct idea is enough. Each area is checked independently. Leaving one blank does not affect your other answers. Leave anything you're unsure about blank.</p>
+<p id="quiz-heading" class="eyebrow">Review quiz</p>
+<h1 id="test-title" tabindex="-1">Explain the code in your own words.</h1>
+<p class="intro">These questions are generated for your code and goal. Respond to each one, or choose “I'm not sure” to record a gap. Short answers are fine. Feedback appears after you submit; the tutor is available if you want help.</p>
 <p class="eyebrow">Your goal</p><p id="test-goal"></p>
-<form id="test-form">
-<div class="test-question"><label for="test-purpose">Purpose — What problem does this code solve?</label><textarea id="test-purpose" placeholder="Explain why it is needed."></textarea></div>
-<div class="test-question"><label for="test-behavior">Behavior — What does the code do?</label><textarea id="test-behavior" placeholder="Describe the main idea in your own words."></textarea></div>
-<div class="test-question"><label for="test-effect">Effect — What consequence or failure can this flow cause, and why?</label><textarea id="test-effect" placeholder="Connect an outcome to the code that causes it."></textarea></div>
-<div class="test-question"><label for="test-edge">Edge cases — What happens at a boundary or unusual input?</label><textarea id="test-edge" placeholder="Describe one boundary and the behavior you expect."></textarea></div>
-<button id="check-understanding" class="primary" type="submit">Check understanding</button>
+<p id="quiz-loading" class="muted">Preparing questions from the supplied code…</p>
+<form id="test-form" hidden>
+<div class="quiz-progress"><label for="quiz-progress">Responses completed</label><progress id="quiz-progress" max="1" value="0"></progress><span id="quiz-progress-text" role="status" aria-live="polite">Preparing your quiz…</span></div>
+<div id="quiz-question-purpose" class="test-question" hidden><p id="question-heading-purpose" class="eyebrow"></p><label id="question-purpose" for="test-purpose"></label><div id="question-reference-purpose"></div><textarea id="test-purpose" placeholder="Your answer…" required disabled></textarea><button id="not-sure-purpose" class="text-button" type="button">I'm not sure</button></div>
+<div id="quiz-question-behavior" class="test-question" hidden><p id="question-heading-behavior" class="eyebrow"></p><label id="question-behavior" for="test-behavior"></label><div id="question-reference-behavior"></div><textarea id="test-behavior" placeholder="Your answer…" required disabled></textarea><button id="not-sure-behavior" class="text-button" type="button">I'm not sure</button></div>
+<div id="quiz-question-effect" class="test-question" hidden><p id="question-heading-effect" class="eyebrow"></p><label id="question-effect" for="test-effect"></label><div id="question-reference-effect"></div><textarea id="test-effect" placeholder="Your answer…" required disabled></textarea><button id="not-sure-effect" class="text-button" type="button">I'm not sure</button></div>
+<div id="quiz-question-edge" class="test-question" hidden><p id="question-heading-edge" class="eyebrow"></p><label id="question-edge" for="test-edge"></label><div id="question-reference-edge"></div><textarea id="test-edge" placeholder="Your answer…" required disabled></textarea><button id="not-sure-edge" class="text-button" type="button">I'm not sure</button></div>
+<button id="check-understanding" class="primary" type="submit" disabled>Submit quiz</button>
 </form>
 <section id="test-results" class="recap-section" hidden aria-labelledby="test-results-title">
-<h2 id="test-results-title" tabindex="-1">Your understanding</h2>
-<div id="test-summary" class="recap-section" aria-label="Results for all four areas"></div>
+<h2 id="test-results-title" tabindex="-1">Quiz feedback</h2>
+<p id="quiz-result-note" class="muted" role="status"></p>
+<div id="test-summary" class="recap-section" aria-label="Results for the quiz questions"></div>
 <div id="test-feedback" class="prose"></div>
 <div id="test-gaps" class="test-gaps"></div>
 <p class="muted">You can continue with gaps recorded, or return to the discussion for help.</p>
 <button id="recap" class="primary" type="button">Continue to recap</button>
 </section>
-<div class="footer"><button id="back-to-talk" type="button">Back to talking</button></div>
+<div class="footer"><button id="back-to-talk" type="button">Get help from the tutor</button></div>
 </section>
 <section id="recap-view" class="view" hidden aria-labelledby="recap-title">
 <div class="recap-hero">
@@ -83,7 +88,7 @@
 </svg>
 <div><p class="eyebrow">Your review, reflected back</p><h1 id="recap-title">Make sense of<br>what you learned.</h1></div>
 </div>
-<p id="progress-description" class="muted">Your test covers all four areas. You can finish with gaps recorded or return to the discussion for help.</p>
+<p id="progress-description" class="muted">You can finish with gaps recorded or return to the discussion for help.</p>
 <p class="eyebrow">Goal</p><p id="recap-goal" class="recap-goal"></p>
 <div id="concepts" aria-label="Evidence by topic"></div>
 <section class="recap-section"><h2 class="eyebrow">Review notes</h2><div id="recap-body" class="prose"></div></section>
@@ -91,6 +96,7 @@
 <p class="muted">A filled brain reflects evidence in this conversation. It does not certify the change or check unseen code.</p>
 <div class="footer recap-footer"><button id="keep-studying" class="primary" type="button">Keep exploring</button><button id="finish" type="button">Finish review</button></div>
 <p id="finished-note" class="muted" role="status" hidden>Review finished. Your conversation stays available until you close this panel. No commit or push was made.</p>
+<div class="recap-section"><button id="approve-commit" type="button" hidden disabled>Approve staged commit</button><p id="commit-gate-note" class="muted" role="status" hidden></p></div>
 </section>
 <section id="preview" class="code-panel" hidden aria-label="Code preview">
 <div class="section-heading"><h2 id="preview-title"></h2><div><button id="show-all-code" class="text-button" type="button">Show all</button><button id="close-preview" class="text-button" type="button">Close code</button></div></div>

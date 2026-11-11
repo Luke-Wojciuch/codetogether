@@ -22,6 +22,16 @@ button:disabled{opacity:.45;cursor:default}
 :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .view{flex:1;min-width:0}
 .test-question{margin:20px 0}
+.test-question{padding:18px 0;border-top:1px solid var(--line)}
+.test-question .eyebrow{margin-bottom:8px}
+.test-question label{font-size:16px;line-height:1.5;overflow-wrap:anywhere}
+.test-question .reference{display:inline-block;margin-bottom:10px}
+.quiz-progress{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:4px}
+.quiz-progress label{width:100%;margin:0;color:var(--muted);font:11px var(--mono);text-transform:uppercase}
+.quiz-progress progress{flex:1;min-width:100px;height:8px;accent-color:var(--green)}
+.quiz-progress span{font-size:12px;color:var(--muted)}
+.mode-actions{flex-wrap:wrap}
+.mode-actions button{flex:1;min-width:150px}
 .test-question textarea{min-height:76px}
 .test-gaps{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
 #test-summary .demonstrated{color:var(--green);font-size:18px;font-weight:700}

@@ -35,9 +35,9 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const assert = __importStar(require("node:assert/strict"));
 const node_test_1 = require("node:test");
-const session_1 = require("../session");
-const stream_1 = require("../stream");
-const changes_1 = require("../changes");
+const session_1 = require("../review/session");
+const stream_1 = require("../models/stream");
+const changes_1 = require("../git/changes");
 const code = {
     label: 'Selected code', sources: [{
             name: 'retry.ts', content: 'const pending = request();\nreturn pending;', language: 'typescript', startLine: 10
