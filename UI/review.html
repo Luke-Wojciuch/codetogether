@@ -55,15 +55,15 @@
 <section id="test-view" class="view" hidden aria-labelledby="test-title">
 <p id="quiz-heading" class="eyebrow">Review quiz</p>
 <h1 id="test-title" tabindex="-1">Explain the code in your own words.</h1>
-<p class="intro">These questions are generated for your code and goal. Respond to each one, or choose “I'm not sure” to record a gap. Short answers are fine. Feedback appears after you submit; the tutor is available if you want help.</p>
+<p class="intro">These questions are generated for your code and goal. Answer any question to get feedback. You can leave others blank and return to them later, or choose “I'm not sure” to record uncertainty. Short answers are fine. Feedback appears after you submit; the tutor is available if you want help.</p>
 <p class="eyebrow">Your goal</p><p id="test-goal"></p>
 <p id="quiz-loading" class="muted">Preparing questions from the supplied code…</p>
 <form id="test-form" hidden>
 <div class="quiz-progress"><label for="quiz-progress">Responses completed</label><progress id="quiz-progress" max="1" value="0"></progress><span id="quiz-progress-text" role="status" aria-live="polite">Preparing your quiz…</span></div>
-<div id="quiz-question-purpose" class="test-question" hidden><p id="question-heading-purpose" class="eyebrow"></p><label id="question-purpose" for="test-purpose"></label><div id="question-reference-purpose"></div><textarea id="test-purpose" placeholder="Your answer…" required disabled></textarea><button id="not-sure-purpose" class="text-button" type="button">I'm not sure</button></div>
-<div id="quiz-question-behavior" class="test-question" hidden><p id="question-heading-behavior" class="eyebrow"></p><label id="question-behavior" for="test-behavior"></label><div id="question-reference-behavior"></div><textarea id="test-behavior" placeholder="Your answer…" required disabled></textarea><button id="not-sure-behavior" class="text-button" type="button">I'm not sure</button></div>
-<div id="quiz-question-effect" class="test-question" hidden><p id="question-heading-effect" class="eyebrow"></p><label id="question-effect" for="test-effect"></label><div id="question-reference-effect"></div><textarea id="test-effect" placeholder="Your answer…" required disabled></textarea><button id="not-sure-effect" class="text-button" type="button">I'm not sure</button></div>
-<div id="quiz-question-edge" class="test-question" hidden><p id="question-heading-edge" class="eyebrow"></p><label id="question-edge" for="test-edge"></label><div id="question-reference-edge"></div><textarea id="test-edge" placeholder="Your answer…" required disabled></textarea><button id="not-sure-edge" class="text-button" type="button">I'm not sure</button></div>
+<div id="quiz-question-purpose" class="test-question" hidden><p id="question-heading-purpose" class="eyebrow"></p><label id="question-purpose" for="test-purpose"></label><div id="question-reference-purpose"></div><textarea id="test-purpose" placeholder="Your answer…" disabled></textarea><button id="not-sure-purpose" class="text-button" type="button">I'm not sure</button></div>
+<div id="quiz-question-behavior" class="test-question" hidden><p id="question-heading-behavior" class="eyebrow"></p><label id="question-behavior" for="test-behavior"></label><div id="question-reference-behavior"></div><textarea id="test-behavior" placeholder="Your answer…" disabled></textarea><button id="not-sure-behavior" class="text-button" type="button">I'm not sure</button></div>
+<div id="quiz-question-effect" class="test-question" hidden><p id="question-heading-effect" class="eyebrow"></p><label id="question-effect" for="test-effect"></label><div id="question-reference-effect"></div><textarea id="test-effect" placeholder="Your answer…" disabled></textarea><button id="not-sure-effect" class="text-button" type="button">I'm not sure</button></div>
+<div id="quiz-question-edge" class="test-question" hidden><p id="question-heading-edge" class="eyebrow"></p><label id="question-edge" for="test-edge"></label><div id="question-reference-edge"></div><textarea id="test-edge" placeholder="Your answer…" disabled></textarea><button id="not-sure-edge" class="text-button" type="button">I'm not sure</button></div>
 <button id="check-understanding" class="primary" type="submit" disabled>Submit quiz</button>
 </form>
 <section id="test-results" class="recap-section" hidden aria-labelledby="test-results-title">
@@ -97,6 +97,11 @@
 <div class="footer recap-footer"><button id="keep-studying" class="primary" type="button">Keep exploring</button><button id="finish" type="button">Finish review</button></div>
 <p id="finished-note" class="muted" role="status" hidden>Review finished. Your conversation stays available until you close this panel. No commit or push was made.</p>
 <div class="recap-section"><button id="approve-commit" type="button" hidden disabled>Approve staged commit</button><p id="commit-gate-note" class="muted" role="status" hidden></p></div>
+</section>
+<section id="file-picker" class="code-panel" hidden aria-label="Supplied files">
+<div class="section-heading"><h2>Supplied files</h2><button id="close-files" class="text-button" type="button">Close files</button></div>
+<p id="picker-note" class="muted"></p><div id="picker-files" class="picker-files"></div>
+<pre id="picker-diff" hidden aria-label="Supplied diff"></pre>
 </section>
 <section id="preview" class="code-panel" hidden aria-label="Code preview">
 <div class="section-heading"><h2 id="preview-title"></h2><div><button id="show-all-code" class="text-button" type="button">Show all</button><button id="close-preview" class="text-button" type="button">Close code</button></div></div>

@@ -14,6 +14,8 @@ let lastTurn;
 let draftMessage;
 let waitTimer;
 let previewReference;
+let codeReturnFocus;
+let codeAnchor;
 let assessment;
 let recapText = '';
 let finished = false;
@@ -23,7 +25,6 @@ let approvingCommit = false;
 let commitApproved = false;
 let commitGateMessage = '';
 let requireAllQuestions = false;
-
 function reviewedTopicIds() {
 	return quizQuestions.length ? quizQuestions.map(question => question.id) : Object.keys(topics);
 }
@@ -36,6 +37,8 @@ function allChecksPassed() {
 }
 
 function setView(next) {
+	codeAnchor = undefined;
+	codeReturnFocus = undefined;
 	view = next;
 	for (const name of ['goal', 'discussion', 'test', 'recap']) {
 		byId(name + '-view').hidden = name !== next;
@@ -43,6 +46,7 @@ function setView(next) {
 		else byId('nav-' + name).removeAttribute('aria-current');
 	}
 	byId('preview').hidden = true;
+	byId('file-picker').hidden = true;
 	if (!failed) byId('status').textContent = '';
 	if (next === 'goal') goalInput.focus();
 	if (next === 'discussion') input.focus();
@@ -124,7 +128,7 @@ function appendText(entry, text) {
 			link.className = 'reference';
 			link.type = 'button';
 			link.textContent = source.name + ':' + line + (endLine === line ? '' : '-' + endLine) + ' · Show code';
-			link.addEventListener('click', () => showCode(sourceId, line, endLine));
+			link.addEventListener('click', () => showCode(sourceId, line, endLine, false, link));
 			entry.append(link);
 		} else entry.append(document.createTextNode('[unavailable code reference]'));
 		position = match.index + match[0].length;
@@ -279,13 +283,15 @@ function quizComplete() {
 }
 function renderCommitGate() {
 	const available = !!context?.staged?.allStaged;
+	const unanswered = quizQuestions.some(question => !quizAnswers()[question.id]);
 	const strictGap = requireAllQuestions && quizComplete() && !allChecksPassed();
 	const button = byId('approve-commit');
 	button.hidden = !available;
-	button.disabled = !available || busy || view !== 'recap' || !quizComplete() || strictGap || commitApproved;
+	button.disabled = !available || busy || view !== 'recap' || !quizComplete() || unanswered || strictGap || commitApproved;
 	button.textContent = approvingCommit ? 'Approving staged snapshot…' : commitApproved ? 'Staged snapshot approved' : 'Approve staged commit';
 	byId('commit-gate-note').hidden = !available;
-	byId('commit-gate-note').textContent = commitGateMessage || (strictGap
+	byId('commit-gate-note').textContent = commitGateMessage || (quizComplete() && unanswered
+		? 'Partial quiz feedback is available. Respond to every question and submit again before approving a commit; you can choose I’m not sure to record a gap.' : strictGap
 		? 'Strict commit approval is on: every question must show understanding. Use the help buttons, revise your answers, and submit the quiz again.'
 		: requireAllQuestions
 			? 'Strict commit approval is on. Enable the commit review gate in CodeTogether: Settings, then submit the quiz for all staged changes. Approval does not run Git commit.'
@@ -298,7 +304,8 @@ function renderQuizProgress() {
 	byId('quiz-progress').max = count || 1;
 	byId('quiz-progress').value = completed;
 	byId('quiz-progress-text').textContent = count ? completed + ' of ' + questionCountLabel(count) + ' completed' : 'Preparing your quiz…';
-	byId('check-understanding').disabled = busy || !count || completed !== count;
+	byId('check-understanding').disabled = busy || !completed;
+	byId('check-understanding').textContent = completed && completed < count ? 'Submit ' + completed + (completed === 1 ? ' answer' : ' answers') : 'Submit quiz';
 	if (quizQuestions.length) {
 		const incomplete = !quizComplete();
 		byId('nav-recap').disabled = busy || incomplete;
@@ -307,7 +314,7 @@ function renderQuizProgress() {
 	}
 	byId('quiz-result-note').textContent = quizSubmission && !quizComplete()
 		? 'Your answers have changed. Submit the quiz again to update the feedback.'
-		: quizSubmission ? (count === 1 ? 'The question has a response.' : 'All ' + count + ' questions have a response.') + ' Any gaps are recorded below.' : '';
+		: quizSubmission ? completed + ' of ' + questionCountLabel(count) + ' answered. ' + (completed < count ? 'Blank questions are unassessed. Add answers and submit again whenever you are ready.' : 'Any gaps are recorded below.') : '';
 	renderCommitGate();
 }
 function openQuiz(fromGoal = false) {
@@ -330,7 +337,8 @@ function renderTestResults(text) {
 		const concept = assessment?.concepts.find(concept => concept.id === id);
 		const row = document.createElement('p');
 		if (concept?.status === 'demonstrated') row.className = 'demonstrated';
-		row.textContent = topics[id] + ': ' + (concept ? statuses[concept.status] : 'Not assessed');
+		const unanswered = quizSubmission && !JSON.parse(quizSubmission)[id];
+		row.textContent = topics[id] + ': ' + (unanswered ? 'Not answered' : concept ? statuses[concept.status] : 'Not assessed');
 		byId('test-summary').append(row);
 		if (concept?.status === 'demonstrated') continue;
 		const button = document.createElement('button');
@@ -344,7 +352,17 @@ function renderTestResults(text) {
 	}
 	byId('test-results').hidden = false;
 }
-function showCode(sourceId, line, endLine = line, all = false) {
+function placeCodePanel(panel, trigger) {
+	if (trigger) {
+		codeReturnFocus = trigger;
+		codeAnchor = trigger.closest('.message, .test-question, .recap-section');
+	}
+	if (codeAnchor && !panel.contains(codeAnchor) && codeAnchor !== panel) codeAnchor.append(panel);
+	else if (view === 'discussion') byId('discussion-view').insertBefore(panel,
+		codeReturnFocus === byId('browse-code') ? byId('thread') : byId('conversation-tools'));
+	else byId(view + '-view').append(panel);
+}
+function showCode(sourceId, line, endLine = line, all = false, trigger) {
 	const source = context?.sources[sourceId - 1];
 	if (!source) return;
 	const lines = source.content.split('\n');
@@ -354,8 +372,8 @@ function showCode(sourceId, line, endLine = line, all = false) {
 	byId('preview-title').textContent = source.name + ':' + line + (endLine === line ? '' : '-' + endLine);
 	byId('preview-selection').textContent = 'Lines ' + line + '-' + endLine + ' selected. Drag over code to change the selection.';
 	const code = byId('code-preview');
-	if (view === 'discussion') byId('discussion-view').insertBefore(byId('preview'), byId('thread'));
-	else byId(view + '-view').append(byId('preview'));
+	byId('file-picker').hidden = true;
+	placeCodePanel(byId('preview'), trigger);
 	code.replaceChildren();
 	for (let n = all ? start : Math.max(start, line - 8); n <= (all ? start + lines.length - 1 : Math.min(start + lines.length - 1, endLine + 8)); n++) {
 		const row = document.createElement('span');
@@ -455,7 +473,7 @@ function renderFiles() {
 			button.addEventListener('click', () => {
 				const source = context.sources[index];
 				const start = source.startLine ?? 1;
-				showCode(index + 1, start, start + source.content.split('\n').length - 1);
+				showCode(index + 1, start, start + source.content.split('\n').length - 1, false, button);
 			});
 			row.append(button);
 		} else {
@@ -469,6 +487,10 @@ function renderFiles() {
 }
 
 function start() {
+	// Detach shared panels before clearing messages that may contain them.
+	byId('goal-view').append(byId('preview'), byId('file-picker'));
+	codeReturnFocus = undefined;
+	codeAnchor = undefined;
 	context = undefined;
 	approvingCommit = false;
 	commitApproved = false;
@@ -518,7 +540,7 @@ function openRecap() {
 	if (busy || !hasDiscussion) return;
 	if (quizQuestions.length && !quizComplete()) {
 		setView('test');
-		byId('status').textContent = 'Respond to each question and submit the quiz before continuing to the recap.';
+		byId('status').textContent = 'Submit at least one answer for feedback before continuing to the recap.';
 		return;
 	}
 	if (recapText) { setView('recap'); return; }
@@ -536,10 +558,28 @@ function addDraft(text) {
 	input.value = input.value.trim() ? input.value + '\n\n' + text : text;
 	input.focus();
 }
-function browseCode() {
+function browseCode(event) {
 	if (!context) return;
-	setView('goal');
-	byId('sources').scrollIntoView({ block: 'nearest' });
+	const picker = byId('file-picker');
+	placeCodePanel(picker, event?.currentTarget ?? byId('browse-code'));
+	const files = byId('picker-files'); files.replaceChildren();
+	for (const [index, source] of context.sources.entries()) {
+		const button = document.createElement('button'); button.type = 'button';
+		button.className = 'file-choice'; button.textContent = source.name;
+		button.addEventListener('click', () => {
+			const start = source.startLine ?? 1;
+			showCode(index + 1, start, start + source.content.split('\n').length - 1);
+		});
+		files.append(button);
+	}
+	byId('picker-note').textContent = context.sources.length ? 'Choose a supplied file.' : context.diff
+		? 'Source text is unavailable. The supplied diff is shown below.' : 'No source text or diff was supplied.';
+	byId('picker-diff').textContent = context.diff ?? '';
+	byId('picker-diff').hidden = !context.diff;
+	byId('preview').hidden = true;
+	picker.hidden = false;
+	picker.scrollIntoView({ block: 'nearest' });
+	(files.children[0] ?? byId('close-files')).focus();
 }
 byId('goal-form').addEventListener('submit', event => {
 	event.preventDefault();
@@ -552,10 +592,9 @@ byId('test-form').addEventListener('submit', event => {
 	event.preventDefault();
 	const answers = quizAnswers();
 	if (busy || !quizQuestions.length) return;
-	const missing = quizQuestions.map(question => question.id).find(id => !answers[id]);
-	if (missing) {
-		byId('test-' + missing).focus();
-		byId('status').textContent = 'Respond to each question, or choose “I\u2019m not sure” to record a gap.';
+	if (!Object.values(answers).some(Boolean)) {
+		byId('test-' + quizQuestions[0].id).focus();
+		byId('status').textContent = 'Answer at least one question. You can leave other questions blank.';
 		return;
 	}
 	send(JSON.stringify(answers), 'test');
@@ -586,15 +625,23 @@ byId('nav-discussion').addEventListener('click', () => { if (hasDiscussion) setV
 byId('nav-recap').addEventListener('click', openRecap);
 byId('edit-goal').addEventListener('click', () => { goalInput.value = goal; setView('goal'); });
 byId('browse-code').addEventListener('click', browseCode);
-byId('show-code').addEventListener('click', () => {
-	if (previewReference) { const { sourceId, line, endLine } = previewReference; showCode(sourceId, line, endLine); }
+byId('show-code').addEventListener('click', event => {
+	if (previewReference) { const { sourceId, line, endLine } = previewReference; showCode(sourceId, line, endLine, false, event.currentTarget); }
 	else if (context?.sources.length === 1) {
 		const source = context.sources[0];
-		showCode(1, source.startLine ?? 1, (source.startLine ?? 1) + source.content.split('\n').length - 1);
-	} else browseCode();
+		showCode(1, source.startLine ?? 1, (source.startLine ?? 1) + source.content.split('\n').length - 1, false, event.currentTarget);
+	} else browseCode(event);
 });
 document.addEventListener('selectionchange', selectPreviewCode);
-byId('close-preview').addEventListener('click', () => { byId('preview').hidden = true; (view === 'goal' ? goalInput : input).focus(); });
+function closeCodePanel() {
+	byId('preview').hidden = true; byId('file-picker').hidden = true;
+	(codeReturnFocus ?? (view === 'goal' ? goalInput : input)).focus({ preventScroll: true });
+}
+byId('close-preview').addEventListener('click', closeCodePanel);
+byId('close-files').addEventListener('click', closeCodePanel);
+for (const id of ['preview', 'file-picker']) byId(id).addEventListener('keydown', event => {
+	if (event.key === 'Escape') { event.preventDefault(); closeCodePanel(); }
+});
 byId('show-all-code').addEventListener('click', () => {
 	if (previewReference) { const { sourceId, line, endLine } = previewReference; showCode(sourceId, line, endLine, true); }
 });
@@ -621,7 +668,7 @@ byId('finish').addEventListener('click', () => {
 	byId('finish').disabled = true;
 });
 byId('approve-commit').addEventListener('click', () => {
-	if (busy || !context?.staged?.allStaged || view !== 'recap' || !quizComplete() || (requireAllQuestions && !allChecksPassed()) || commitApproved) return;
+	if (busy || !context?.staged?.allStaged || view !== 'recap' || !quizComplete() || quizQuestions.some(question => !quizAnswers()[question.id]) || (requireAllQuestions && !allChecksPassed()) || commitApproved) return;
 	approvingCommit = true;
 	setBusy(true);
 	byId('cancel').hidden = true;

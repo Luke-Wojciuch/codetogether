@@ -198,7 +198,7 @@ function activate(context) {
                     if (!session.quiz) {
                         throw new Error('Generate a review quiz before submitting answers.');
                     }
-                    (0, quiz_1.requireQuizAnswers)(answer, session.quiz.questions);
+                    (0, quiz_1.requireQuizAnswers)(answer, session.quiz.questions, true);
                 }
                 const reply = kind === 'test' ? await (0, quiz_1.assessQuiz)(activeSession.quiz, answer, async (question, areaAnswer) => {
                     const messages = activeSession.messages(JSON.stringify({ goal: activeSession.quiz.goal, question, answer: areaAnswer }), 'test');

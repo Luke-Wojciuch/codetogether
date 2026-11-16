@@ -68,7 +68,7 @@ export class Session {
 	complete(answer: string, reply: string, kind: TurnKind = 'discussion'): string {
 		let text = visibleReply(reply).trim();
 		if (kind === 'test') {
-			const answers = this.quiz ? Object.values(requireQuizAnswers(answer, this.quiz.questions)) : submittedAnswers(answer);
+			const answers = this.quiz ? Object.values(requireQuizAnswers(answer, this.quiz.questions, true)) : submittedAnswers(answer);
 			const assessment = parseAssessment(reply, answers, this.quiz?.questions.map(question => question.id));
 			if (!assessment) { throw new Error('The model did not return a usable assessment. Your answers are saved; retry the check.'); }
 			if (reply.trimStart().startsWith('{')) {
@@ -78,7 +78,7 @@ export class Session {
 			if (!text) { throw new Error('The model returned no assessment feedback. Your answers are saved; retry the check.'); }
 			this.assessment = assessment;
 			if (this.quiz) {
-				const submitted = requireQuizAnswers(answer, this.quiz.questions);
+				const submitted = requireQuizAnswers(answer, this.quiz.questions, true);
 				this.reviewedAnswers = JSON.stringify(this.quiz.questions.map(question => submitted[question.id].trim()));
 			}
 		}

@@ -61,7 +61,7 @@ class Session {
     complete(answer, reply, kind = 'discussion') {
         let text = (0, assessment_1.visibleReply)(reply).trim();
         if (kind === 'test') {
-            const answers = this.quiz ? Object.values((0, quiz_2.requireQuizAnswers)(answer, this.quiz.questions)) : (0, assessment_1.submittedAnswers)(answer);
+            const answers = this.quiz ? Object.values((0, quiz_2.requireQuizAnswers)(answer, this.quiz.questions, true)) : (0, assessment_1.submittedAnswers)(answer);
             const assessment = (0, assessment_1.parseAssessment)(reply, answers, this.quiz?.questions.map(question => question.id));
             if (!assessment) {
                 throw new Error('The model did not return a usable assessment. Your answers are saved; retry the check.');
@@ -75,7 +75,7 @@ class Session {
             }
             this.assessment = assessment;
             if (this.quiz) {
-                const submitted = (0, quiz_2.requireQuizAnswers)(answer, this.quiz.questions);
+                const submitted = (0, quiz_2.requireQuizAnswers)(answer, this.quiz.questions, true);
                 this.reviewedAnswers = JSON.stringify(this.quiz.questions.map(question => submitted[question.id].trim()));
             }
         }

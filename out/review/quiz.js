@@ -25,13 +25,18 @@ exports.quizAssessmentFormat = {
     }
 };
 async function assessQuiz(quiz, submission, evaluate) {
-    const answers = requireQuizAnswers(submission, quiz.questions);
+    const answers = requireQuizAnswers(submission, quiz.questions, true);
     const concepts = [];
     const feedback = [];
     const uncertainties = [];
     for (const question of quiz.questions) {
         const answer = answers[question.id].trim();
         const label = question.id === 'edge' ? 'Edge cases' : question.id[0].toUpperCase() + question.id.slice(1);
+        if (!answer) {
+            concepts.push({ id: question.id, status: 'unexplored' });
+            feedback.push('### ' + label + '\nNot answered yet. No assessment was requested for this question. You can add an answer and submit again.');
+            continue;
+        }
         if (/^(?:i['’]m not sure(?: yet)?|i (?:do not|don['’]t) know)[.!?]?$/i.test(answer)) {
             concepts.push({ id: question.id, status: 'unexplored' });
             feedback.push('### ' + label + '\nYou recorded that you are not sure yet. You can ask the tutor for help or finish with this gap recorded.');
@@ -111,7 +116,7 @@ function parseQuiz(raw, context) {
     }
     return questions;
 }
-function requireQuizAnswers(submission, questions) {
+function requireQuizAnswers(submission, questions, allowPartial = false) {
     let answers;
     try {
         answers = JSON.parse(submission);
@@ -119,8 +124,11 @@ function requireQuizAnswers(submission, questions) {
     catch { /* Use the same recoverable error for an incomplete or unreadable submission. */ }
     if (!answers || typeof answers !== 'object' || Array.isArray(answers) ||
         Object.keys(answers).length !== questions.length || !questions.length ||
-        questions.some(question => typeof answers[question.id] !== 'string' || !answers[question.id].trim())) {
+        questions.some(question => typeof answers[question.id] !== 'string' || (!allowPartial && !answers[question.id].trim()))) {
         throw new Error('Respond to every question in this quiz. You can say "I\u2019m not sure" when you need help.');
+    }
+    if (allowPartial && !questions.some(question => answers[question.id].trim())) {
+        throw new Error('Answer at least one question before submitting. You can leave other questions blank.');
     }
     return answers;
 }

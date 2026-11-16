@@ -34,13 +34,18 @@ export const quizAssessmentFormat = {
 
 export async function assessQuiz(quiz: Quiz, submission: string,
 	evaluate: (question: QuizQuestion, answer: string) => Promise<string>): Promise<string> {
-	const answers = requireQuizAnswers(submission, quiz.questions);
+	const answers = requireQuizAnswers(submission, quiz.questions, true);
 	const concepts: Concept[] = [];
 	const feedback: string[] = [];
 	const uncertainties: string[] = [];
 	for (const question of quiz.questions) {
 		const answer = answers[question.id].trim();
 		const label = question.id === 'edge' ? 'Edge cases' : question.id[0].toUpperCase() + question.id.slice(1);
+		if (!answer) {
+			concepts.push({ id: question.id, status: 'unexplored' });
+			feedback.push('### ' + label + '\nNot answered yet. No assessment was requested for this question. You can add an answer and submit again.');
+			continue;
+		}
 		if (/^(?:i['’]m not sure(?: yet)?|i (?:do not|don['’]t) know)[.!?]?$/i.test(answer)) {
 			concepts.push({ id: question.id, status: 'unexplored' });
 			feedback.push('### ' + label + '\nYou recorded that you are not sure yet. You can ask the tutor for help or finish with this gap recorded.');
@@ -108,13 +113,16 @@ export function parseQuiz(raw: string, context: CodeContext): QuizQuestion[] {
 	return questions;
 }
 
-export function requireQuizAnswers(submission: string, questions: readonly QuizQuestion[]): Record<string, string> {
+export function requireQuizAnswers(submission: string, questions: readonly QuizQuestion[], allowPartial = false): Record<string, string> {
 	let answers;
 	try { answers = JSON.parse(submission); } catch { /* Use the same recoverable error for an incomplete or unreadable submission. */ }
 	if (!answers || typeof answers !== 'object' || Array.isArray(answers) ||
 		Object.keys(answers).length !== questions.length || !questions.length ||
-		questions.some(question => typeof answers[question.id] !== 'string' || !answers[question.id].trim())) {
+		questions.some(question => typeof answers[question.id] !== 'string' || (!allowPartial && !answers[question.id].trim()))) {
 		throw new Error('Respond to every question in this quiz. You can say "I\u2019m not sure" when you need help.');
+	}
+	if (allowPartial && !questions.some(question => answers[question.id].trim())) {
+		throw new Error('Answer at least one question before submitting. You can leave other questions blank.');
 	}
 	return answers as Record<string, string>;
 }

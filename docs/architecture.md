@@ -54,6 +54,8 @@ out/                        Generated JavaScript; mirrors src/
 
 Quiz completion is the default policy, not a perfect score. Gaps are allowed unless the optional strict setting is on. Approval does not certify correctness. This is a bypassable local workflow aid, not server-side access control.
 
+Tutor feedback accepts a quiz submission with at least one nonblank answer. Blank questions receive an unassessed gap without a model call; the submitted fields and latest successful feedback remain available for revision. Recap and finishing may include unanswered gaps. Commit approval independently uses full-response validation and still requires a response (including explicit uncertainty) for every generated question.
+
 ## Deliberate limits / next cleanup
 
 `extension.ts` still coordinates several panel concerns, and `UI/review.js` still contains all browser view state/rendering. Those are the main remaining refactoring candidates. They are kept intact here to avoid a broad UI rewrite alongside Git enforcement. There is no automatic hook chaining, automatic editor launch from Git, or push/CI gate.

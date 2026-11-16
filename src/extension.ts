@@ -148,7 +148,7 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 				if (kind === 'test') {
 					if (!session.quiz) { throw new Error('Generate a review quiz before submitting answers.'); }
-					requireQuizAnswers(answer, session.quiz.questions);
+					requireQuizAnswers(answer, session.quiz.questions, true);
 				}
 				const reply = kind === 'test' ? await assessQuiz(activeSession.quiz!, answer, async (question, areaAnswer) => {
 					const messages = activeSession.messages(JSON.stringify({ goal: activeSession.quiz!.goal, question, answer: areaAnswer }), 'test');

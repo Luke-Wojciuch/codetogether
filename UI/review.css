@@ -129,6 +129,10 @@ blockquote{font:italic 21px/1.4 var(--serif);margin:10px 0;overflow-wrap:anywher
 .response code{font-family:var(--mono);font-size:.9em;background:var(--surface);border:1px solid var(--line);border-radius:3px;padding:1px 4px}
 .response pre{padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:4px;white-space:pre;overflow-wrap:normal}
 .response pre code{font-size:inherit;border:0;padding:0;background:transparent}
+.picker-files{display:grid;gap:6px}
+.file-choice{text-align:left;font:12px var(--mono);overflow-wrap:anywhere}
+#picker-diff{max-height:260px;white-space:pre}
+.message .code-panel{white-space:normal;font-size:13px;line-height:1.5}
 #uncertainties{padding-left:18px;font:italic 18px/1.5 var(--serif)}
 .recap-footer .primary{flex:1}
 .request-status{display:flex;align-items:center;gap:12px;position:sticky;bottom:0;background:var(--bg);z-index:2;font-size:12px;color:var(--muted);padding:4px 0}

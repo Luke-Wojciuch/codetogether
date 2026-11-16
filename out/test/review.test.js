@@ -283,9 +283,9 @@ const reply = 'The retry can repeat a write. [[1:10-11]]\n<review-state>' + JSON
         assert.equal(requests[0].structured, quiz_1.quizFormat);
         assert.equal(posted.at(-1)?.type, 'quiz');
         assert.deepEqual(posted.at(-1)?.questions, quizQuestions);
-        await receive({ type: 'send', kind: 'test', text: JSON.stringify({ purpose: answer, behavior: '', effect: '', edge: '' }) });
+        await receive({ type: 'send', kind: 'test', text: JSON.stringify({ purpose: '', behavior: '', effect: '', edge: '' }) });
         assert.equal(requests.length, 1);
-        assert.match(posted.at(-1)?.text ?? '', /every question/);
+        assert.match(posted.at(-1)?.text ?? '', /at least one/);
         await receive({ type: 'send', kind: 'test', text: JSON.stringify(Object.fromEntries(assessment_1.conceptIds.map(id => [id, 'My reasoning about ' + id]))) });
         assert.equal(requests.length, 5);
         for (const [index, request] of requests.slice(1).entries()) {
@@ -313,6 +313,30 @@ const reply = 'The retry can repeat a write. [[1:10-11]]\n<review-state>' + JSON
         assert.equal(posted.at(-1)?.type, 'commit-approval-error');
         assert.match(posted.at(-1)?.text ?? '', /ALL staged changes/);
         assert.equal(requests.length, 7);
+        generatedQuestions = quizQuestions;
+        await receive({ type: 'send', kind: 'quiz', text: 'Review all paths.' });
+        const beforePartial = requests.length;
+        await receive({ type: 'send', kind: 'test', text: JSON.stringify({ purpose: 'It returns the request promise.', behavior: '', effect: '', edge: '' }) });
+        assert.equal(requests.length, beforePartial + 1);
+        assert.equal(posted.at(-1)?.type, 'reply');
+        assert.match(posted.at(-1)?.text ?? '', /Not answered yet/);
+    });
+    (0, node_test_1.test)('partial quizzes assess only supplied answers and preserve commit completion requirements', async () => {
+        const session = new session_1.Session(quizCode);
+        session.setQuiz('Understand the request', quizRaw);
+        const submission = JSON.stringify({ purpose: 'Returns a promise', behavior: '', effect: '   ', edge: '' });
+        const calls = [];
+        const result = await (0, quiz_1.assessQuiz)(session.quiz, submission, async (question, answer) => {
+            calls.push(question.id);
+            return JSON.stringify({ status: 'demonstrated', quote: answer, feedback: 'You identified the returned promise.', uncertainties: [] });
+        });
+        assert.deepEqual(calls, ['purpose']);
+        session.complete(submission, result, 'test');
+        assert.equal(session.assessment?.concepts.filter(concept => concept.status === 'unexplored').length, 3);
+        assert.throws(() => session.requireReviewedQuiz(submission), /every question/);
+        await assert.rejects((0, quiz_1.assessQuiz)(session.quiz, JSON.stringify({ purpose: '', behavior: '', effect: '', edge: '' }), async () => {
+            assert.fail('All-blank submissions must not call a model.');
+        }), /at least one/);
     });
     (0, node_test_1.test)('question-specific grading assigns the topic in code and validates evidence against only its own answer', async () => {
         const quiz = { goal: 'Understand the request.', questions: quizQuestions };
@@ -423,13 +447,13 @@ const reply = 'The retry can repeat a write. [[1:10-11]]\n<review-state>' + JSON
         assert.ok(assessment.some(message => message.content.includes('Understand this promise.')));
         assert.equal(session.messages('Help me.')[0].content.startsWith('Be a code tutor'), true);
     });
-    (0, node_test_1.test)('quiz completion requires all responses and accepts explicitly recorded uncertainty', () => {
+    (0, node_test_1.test)('commit completion requires all responses while feedback accepts partial answers', () => {
         assert.throws(() => (0, quiz_1.requireQuizAnswers)(JSON.stringify({ purpose: 'A request', behavior: '', effect: '', edge: '' }), quizQuestions), /every question/);
         assert.throws(() => (0, quiz_1.requireQuizAnswers)('I understand it', quizQuestions), /every question/);
         assert.doesNotThrow(() => (0, quiz_1.requireQuizAnswers)(JSON.stringify(Object.fromEntries(assessment_1.conceptIds.map(id => [id, "I'm not sure yet."]))), quizQuestions));
         const session = new session_1.Session(quizCode);
         session.setQuiz('Understand the promise', quizRaw);
-        assert.throws(() => session.complete(JSON.stringify({ purpose: answer, behavior: '', effect: '', edge: '' }), reply, 'test'), /every question/);
+        assert.throws(() => session.complete(JSON.stringify({ purpose: '', behavior: '', effect: '', edge: '' }), reply, 'test'), /at least one/);
         assert.equal(session.assessment, undefined);
     });
     (0, node_test_1.test)('failed generation preserves the current quiz and history; a successful goal change clears it', () => {
@@ -485,6 +509,9 @@ class Element {
     hidden = false;
     disabled = false;
     nodeType = 1;
+    focusCalls = 0;
+    focusOptions;
+    scrollOptions;
     classList = { toggle: (name, on) => {
             const classes = this.className.split(' ').filter(item => item !== name);
             if (on) {
@@ -513,10 +540,12 @@ class Element {
     setAttribute(name, value) { this.attributes[name] = value; }
     removeAttribute(name) { delete this.attributes[name]; }
     contains(node) { return node === this || this.children.some(child => child.contains(node)); }
-    closest() { return this.className.split(' ').includes('code-line') ? this : this.parentElement?.closest(); }
+    closest(selector = '.code-line') {
+        return selector.split(',').some(part => this.className.split(' ').includes(part.trim().slice(1))) ? this : this.parentElement?.closest(selector);
+    }
     get previousElementSibling() { return this.parentElement?.children[(this.parentElement?.children.indexOf(this) ?? 0) - 1]; }
-    focus() { }
-    scrollIntoView() { }
+    focus(options) { this.focusCalls++; this.focusOptions = options; }
+    scrollIntoView(options) { this.scrollOptions = options; }
 }
 function panel() {
     let waiting;
@@ -536,6 +565,7 @@ function panel() {
         document: {
             getElementById: get, querySelectorAll: () => [], addEventListener: () => { },
             createElement: (tag) => Object.assign(new Element(), { tagName: tag.toUpperCase() }),
+            createElementNS: (_namespace, tag) => Object.assign(new Element(), { tagName: tag.toUpperCase() }),
             createTextNode: (text) => Object.assign(new Element(), { textContent: text, nodeType: 3 })
         },
         window: { getSelection: () => null, addEventListener: (_, listener) => { receive = listener; } },
@@ -543,7 +573,7 @@ function panel() {
     });
     (0, node_vm_1.runInContext)((0, node_fs_1.readFileSync)((0, node_path_1.resolve)(__dirname, '../../UI/review.js'), 'utf8'), sandbox);
     const emit = (data) => receive({ data });
-    const click = (id, type = 'click') => get(id).listeners[type]({ preventDefault() { } });
+    const click = (id, type = 'click') => get(id).listeners[type]({ preventDefault() { }, currentTarget: get(id) });
     const load = () => emit({ type: 'context', context: {
             label: 'Staged snapshot', changes: [{ name: 'retry.ts', added: 3, deleted: 1 }],
             sources: [{ name: 'retry.ts', content: 'const pending = request();\nreturn pending;', startLine: 10 }]
@@ -556,6 +586,58 @@ function panel() {
     return { get, emit, click, load, begin, generateQuiz, fillQuiz, messages, sandbox, tick: () => waiting?.() };
 }
 (0, node_test_1.suite)('Discussion, test, and recap', () => {
+    (0, node_test_1.test)('one typed answer submits with other fields blank and partial results cannot approve a commit', () => {
+        const p = panel();
+        p.emit({ type: 'context', context: { ...quizCode, staged: { allStaged: true } } });
+        p.begin();
+        p.emit({ type: 'reply', text: 'Ready.' });
+        p.generateQuiz();
+        p.get('test-behavior').value = 'Returns the pending promise';
+        p.click('test-behavior', 'input');
+        assert.equal(p.get('check-understanding').disabled, false);
+        assert.equal(p.get('check-understanding').textContent, 'Submit 1 answer');
+        p.click('test-form', 'submit');
+        assert.equal(p.messages.at(-1)?.kind, 'test');
+        assert.deepEqual(JSON.parse(p.messages.at(-1).text), { purpose: '', behavior: 'Returns the pending promise', effect: '', edge: '' });
+        p.emit({ type: 'reply', text: 'Your submitted answer was checked.', assessment: state });
+        assert.match(p.get('test-summary').children[0].textContent, /Not answered/);
+        assert.match(p.get('quiz-result-note').textContent, /1 of 4.*Blank questions are unassessed/);
+        assert.equal(p.get('recap').disabled, false);
+        p.click('recap');
+        p.emit({ type: 'reply', text: 'Three questions remain unanswered.', assessment: state });
+        assert.equal(p.get('approve-commit').disabled, true);
+        const requests = p.messages.length;
+        p.click('approve-commit');
+        assert.equal(p.messages.length, requests);
+    });
+    (0, node_test_1.test)('file browsing stays in the discussion, preserves drafts, and opens a chosen snapshot directly', () => {
+        const p = panel();
+        p.emit({ type: 'context', context: { label: 'Two files', sources: [quizCode.sources[0], { name: 'other.ts', content: 'run();' }] } });
+        p.begin();
+        p.emit({ type: 'reply', text: 'Ready.' });
+        p.get('input').value = 'Keep this draft';
+        const requests = p.messages.length;
+        p.click('show-code');
+        assert.equal(p.get('discussion-view').hidden, false);
+        assert.equal(p.get('goal-view').hidden, true);
+        assert.equal(p.get('file-picker').hidden, false);
+        assert.equal(p.get('picker-files').children.length, 2);
+        p.get('picker-files').children[1].listeners.click({ preventDefault() { } });
+        assert.equal(p.get('file-picker').hidden, true);
+        assert.equal(p.get('preview').hidden, false);
+        assert.equal(p.get('preview-title').textContent, 'other.ts:1');
+        assert.equal(p.get('code-preview').children[0].className, 'code-line highlight');
+        p.click('open-snapshot');
+        assert.equal(p.messages.at(-1)?.type, 'reference');
+        assert.equal(p.messages.length, requests + 1);
+        assert.equal(p.get('input').value, 'Keep this draft');
+        const focused = p.get('show-code').focusCalls;
+        p.click('close-preview');
+        assert.equal(p.get('show-code').focusCalls, focused + 1);
+        p.click('browse-code');
+        p.get('file-picker').listeners.keydown({ key: 'Escape', preventDefault() { } });
+        assert.equal(p.get('file-picker').hidden, true);
+    });
     (0, node_test_1.test)('staged approval is explicit, requires a submitted quiz, preserves gaps, and never runs a model request', () => {
         const p = panel();
         p.emit({ type: 'context', context: { ...quizCode, staged: {
@@ -700,7 +782,7 @@ function panel() {
         assert.equal(p.get('quiz-progress-text').textContent, '0 of 4 questions completed');
         p.click('not-sure-purpose');
         assert.equal(p.get('quiz-progress-text').textContent, '1 of 4 questions completed');
-        assert.equal(p.get('check-understanding').disabled, true);
+        assert.equal(p.get('check-understanding').disabled, false);
         p.fillQuiz();
         assert.equal(p.get('quiz-progress-text').textContent, '4 of 4 questions completed');
         assert.equal(p.get('check-understanding').disabled, false);
@@ -721,8 +803,14 @@ function panel() {
             assert.equal(reference.children[0].className, 'secondary');
             assert.equal(reference.children[0].type, 'button');
             const requests = p.messages.length;
-            reference.children[0].listeners.click({ preventDefault() { } });
-            assert.equal(p.get('goal-view').hidden, false);
+            reference.children[0].listeners.click({ preventDefault() { }, currentTarget: reference.children[0] });
+            assert.equal(p.get('goal-view').hidden, true);
+            assert.equal(p.get('test-view').hidden, false);
+            assert.equal(p.get('file-picker').hidden, false);
+            assert.equal(p.get('picker-files').children.length, context.sources.length);
+            if ('diff' in context) {
+                assert.equal(p.get('picker-diff').textContent, context.diff);
+            }
             assert.equal(p.messages.length, requests);
             p.click('nav-test');
             assert.equal(p.get('test-view').hidden, false);

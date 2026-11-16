@@ -226,9 +226,9 @@ suite('Generated review quiz', () => {
 		assert.equal(requests[0].structured, quizFormat);
 		assert.equal(posted.at(-1)?.type, 'quiz');
 		assert.deepEqual(posted.at(-1)?.questions, quizQuestions);
-		await receive({ type: 'send', kind: 'test', text: JSON.stringify({ purpose: answer, behavior: '', effect: '', edge: '' }) });
+		await receive({ type: 'send', kind: 'test', text: JSON.stringify({ purpose: '', behavior: '', effect: '', edge: '' }) });
 		assert.equal(requests.length, 1);
-		assert.match(posted.at(-1)?.text ?? '', /every question/);
+		assert.match(posted.at(-1)?.text ?? '', /at least one/);
 		await receive({ type: 'send', kind: 'test', text: JSON.stringify(Object.fromEntries(conceptIds.map(id => [id, 'My reasoning about ' + id]))) });
 		assert.equal(requests.length, 5);
 		for (const [index, request] of requests.slice(1).entries()) {
@@ -256,6 +256,30 @@ suite('Generated review quiz', () => {
 		assert.equal(posted.at(-1)?.type, 'commit-approval-error');
 		assert.match(posted.at(-1)?.text ?? '', /ALL staged changes/);
 		assert.equal(requests.length, 7);
+		generatedQuestions = quizQuestions;
+		await receive({ type: 'send', kind: 'quiz', text: 'Review all paths.' });
+		const beforePartial = requests.length;
+		await receive({ type: 'send', kind: 'test', text: JSON.stringify({ purpose: 'It returns the request promise.', behavior: '', effect: '', edge: '' }) });
+		assert.equal(requests.length, beforePartial + 1);
+		assert.equal(posted.at(-1)?.type, 'reply');
+		assert.match(posted.at(-1)?.text ?? '', /Not answered yet/);
+
+	});
+	test('partial quizzes assess only supplied answers and preserve commit completion requirements', async () => {
+		const session = new Session(quizCode); session.setQuiz('Understand the request', quizRaw);
+		const submission = JSON.stringify({ purpose: 'Returns a promise', behavior: '', effect: '   ', edge: '' });
+		const calls: string[] = [];
+		const result = await assessQuiz(session.quiz!, submission, async (question, answer) => {
+			calls.push(question.id);
+			return JSON.stringify({ status: 'demonstrated', quote: answer, feedback: 'You identified the returned promise.', uncertainties: [] });
+		});
+		assert.deepEqual(calls, ['purpose']);
+		session.complete(submission, result, 'test');
+		assert.equal(session.assessment?.concepts.filter(concept => concept.status === 'unexplored').length, 3);
+		assert.throws(() => session.requireReviewedQuiz(submission), /every question/);
+		await assert.rejects(assessQuiz(session.quiz!, JSON.stringify({ purpose: '', behavior: '', effect: '', edge: '' }), async () => {
+			assert.fail('All-blank submissions must not call a model.');
+		}), /at least one/);
 	});
 	test('question-specific grading assigns the topic in code and validates evidence against only its own answer', async () => {
 		const quiz = { goal: 'Understand the request.', questions: quizQuestions };
@@ -366,13 +390,13 @@ suite('Generated review quiz', () => {
 		assert.ok(assessment.some(message => message.content.includes('Understand this promise.')));
 		assert.equal(session.messages('Help me.')[0].content.startsWith('Be a code tutor'), true);
 	});
-	test('quiz completion requires all responses and accepts explicitly recorded uncertainty', () => {
+	test('commit completion requires all responses while feedback accepts partial answers', () => {
 		assert.throws(() => requireQuizAnswers(JSON.stringify({ purpose: 'A request', behavior: '', effect: '', edge: '' }), quizQuestions), /every question/);
 		assert.throws(() => requireQuizAnswers('I understand it', quizQuestions), /every question/);
 		assert.doesNotThrow(() => requireQuizAnswers(JSON.stringify(Object.fromEntries(conceptIds.map(id => [id, "I'm not sure yet."]))), quizQuestions));
 		const session = new Session(quizCode);
 		session.setQuiz('Understand the promise', quizRaw);
-		assert.throws(() => session.complete(JSON.stringify({ purpose: answer, behavior: '', effect: '', edge: '' }), reply, 'test'), /every question/);
+		assert.throws(() => session.complete(JSON.stringify({ purpose: '', behavior: '', effect: '', edge: '' }), reply, 'test'), /at least one/);
 		assert.equal(session.assessment, undefined);
 	});
 	test('failed generation preserves the current quiz and history; a successful goal change clears it', () => {
@@ -421,13 +445,16 @@ class Element {
 	dataset: Record<string, string> = {};
 	attributes: Record<string, string> = {};
 	style: Record<string, string> = {};
-	listeners: Record<string, (event: { preventDefault(): void }) => void> = {};
+	listeners: Record<string, (event: { preventDefault(): void; currentTarget?: Element; key?: string }) => void> = {};
 	textContent = '';
 	value = '';
 	className = '';
 	hidden = false;
 	disabled = false;
 	nodeType = 1;
+	focusCalls = 0;
+	focusOptions?: { preventScroll?: boolean };
+	scrollOptions?: { block?: string };
 	classList = { toggle: (name: string, on: boolean) => {
 		const classes = this.className.split(' ').filter(item => item !== name);
 		if (on) { classes.push(name); }
@@ -448,14 +475,16 @@ class Element {
 	}
 	remove() { if (this.parentElement) { this.parentElement.children = this.parentElement.children.filter(item => item !== this); } }
 	replaceChildren() { this.children = []; }
-	addEventListener(type: string, listener: (event: { preventDefault(): void }) => void) { this.listeners[type] = listener; }
+	addEventListener(type: string, listener: (event: { preventDefault(): void; currentTarget?: Element; key?: string }) => void) { this.listeners[type] = listener; }
 	setAttribute(name: string, value: string) { this.attributes[name] = value; }
 	removeAttribute(name: string) { delete this.attributes[name]; }
 	contains(node: Element): boolean { return node === this || this.children.some(child => child.contains(node)); }
-	closest(): Element | undefined { return this.className.split(' ').includes('code-line') ? this : this.parentElement?.closest(); }
+	closest(selector = '.code-line'): Element | undefined {
+		return selector.split(',').some(part => this.className.split(' ').includes(part.trim().slice(1))) ? this : this.parentElement?.closest(selector);
+	}
 	get previousElementSibling(): Element | undefined { return this.parentElement?.children[(this.parentElement?.children.indexOf(this) ?? 0) - 1]; }
-	focus() { /* No layout in this harness. */ }
-	scrollIntoView() { /* No layout in this harness. */ }
+	focus(options?: { preventScroll?: boolean }) { this.focusCalls++; this.focusOptions = options; }
+	scrollIntoView(options?: { block?: string }) { this.scrollOptions = options; }
 }
 
 function panel() {
@@ -474,6 +503,7 @@ function panel() {
 		document: {
 			getElementById: get, querySelectorAll: () => [], addEventListener: () => {},
 			createElement: (tag: string) => Object.assign(new Element(), { tagName: tag.toUpperCase() }),
+			createElementNS: (_namespace: string, tag: string) => Object.assign(new Element(), { tagName: tag.toUpperCase() }),
 			createTextNode: (text: string) => Object.assign(new Element(), { textContent: text, nodeType: 3 })
 		},
 		window: { getSelection: () => null, addEventListener: (_: string, listener: typeof receive) => { receive = listener; } },
@@ -481,7 +511,7 @@ function panel() {
 	});
 	runInContext(readFileSync(resolve(__dirname, '../../UI/review.js'), 'utf8'), sandbox);
 	const emit = (data: object) => receive({ data });
-	const click = (id: string, type = 'click') => get(id).listeners[type]({ preventDefault() {} });
+	const click = (id: string, type = 'click') => get(id).listeners[type]({ preventDefault() {}, currentTarget: get(id) });
 	const load = () => emit({ type: 'context', context: {
 		label: 'Staged snapshot', changes: [{ name: 'retry.ts', added: 3, deleted: 1 }],
 		sources: [{ name: 'retry.ts', content: 'const pending = request();\nreturn pending;', startLine: 10 }]
@@ -493,6 +523,50 @@ function panel() {
 }
 
 suite('Discussion, test, and recap', () => {
+	test('one typed answer submits with other fields blank and partial results cannot approve a commit', () => {
+		const p = panel(); p.emit({ type: 'context', context: { ...quizCode, staged: { allStaged: true } } });
+		p.begin(); p.emit({ type: 'reply', text: 'Ready.' }); p.generateQuiz();
+		p.get('test-behavior').value = 'Returns the pending promise'; p.click('test-behavior', 'input');
+		assert.equal(p.get('check-understanding').disabled, false);
+		assert.equal(p.get('check-understanding').textContent, 'Submit 1 answer');
+		p.click('test-form', 'submit');
+		assert.equal(p.messages.at(-1)?.kind, 'test');
+		assert.deepEqual(JSON.parse(p.messages.at(-1)!.text!), { purpose: '', behavior: 'Returns the pending promise', effect: '', edge: '' });
+		p.emit({ type: 'reply', text: 'Your submitted answer was checked.', assessment: state });
+		assert.match(p.get('test-summary').children[0].textContent, /Not answered/);
+		assert.match(p.get('quiz-result-note').textContent, /1 of 4.*Blank questions are unassessed/);
+		assert.equal(p.get('recap').disabled, false);
+		p.click('recap'); p.emit({ type: 'reply', text: 'Three questions remain unanswered.', assessment: state });
+		assert.equal(p.get('approve-commit').disabled, true);
+		const requests = p.messages.length; p.click('approve-commit'); assert.equal(p.messages.length, requests);
+	});
+	test('file browsing stays in the discussion, preserves drafts, and opens a chosen snapshot directly', () => {
+		const p = panel();
+		p.emit({ type: 'context', context: { label: 'Two files', sources: [quizCode.sources[0], { name: 'other.ts', content: 'run();' }] } });
+		p.begin(); p.emit({ type: 'reply', text: 'Ready.' });
+		p.get('input').value = 'Keep this draft';
+		const requests = p.messages.length;
+		p.click('show-code');
+		assert.equal(p.get('discussion-view').hidden, false);
+		assert.equal(p.get('goal-view').hidden, true);
+		assert.equal(p.get('file-picker').hidden, false);
+		assert.equal(p.get('picker-files').children.length, 2);
+		p.get('picker-files').children[1].listeners.click({ preventDefault() {} });
+		assert.equal(p.get('file-picker').hidden, true);
+		assert.equal(p.get('preview').hidden, false);
+		assert.equal(p.get('preview-title').textContent, 'other.ts:1');
+		assert.equal(p.get('code-preview').children[0].className, 'code-line highlight');
+		p.click('open-snapshot');
+		assert.equal(p.messages.at(-1)?.type, 'reference');
+		assert.equal(p.messages.length, requests + 1);
+		assert.equal(p.get('input').value, 'Keep this draft');
+		const focused = p.get('show-code').focusCalls;
+		p.click('close-preview');
+		assert.equal(p.get('show-code').focusCalls, focused + 1);
+		p.click('browse-code');
+		p.get('file-picker').listeners.keydown({ key: 'Escape', preventDefault() {} });
+		assert.equal(p.get('file-picker').hidden, true);
+	});
 	test('staged approval is explicit, requires a submitted quiz, preserves gaps, and never runs a model request', () => {
 		const p = panel();
 		p.emit({ type: 'context', context: { ...quizCode, staged: {
@@ -620,7 +694,7 @@ suite('Discussion, test, and recap', () => {
 		assert.equal(p.get('quiz-progress-text').textContent, '0 of 4 questions completed');
 		p.click('not-sure-purpose');
 		assert.equal(p.get('quiz-progress-text').textContent, '1 of 4 questions completed');
-		assert.equal(p.get('check-understanding').disabled, true);
+		assert.equal(p.get('check-understanding').disabled, false);
 		p.fillQuiz();
 		assert.equal(p.get('quiz-progress-text').textContent, '4 of 4 questions completed');
 		assert.equal(p.get('check-understanding').disabled, false);
@@ -640,8 +714,12 @@ suite('Discussion, test, and recap', () => {
 			assert.equal(reference.children[0].className, 'secondary');
 			assert.equal(reference.children[0].type, 'button');
 			const requests = p.messages.length;
-			reference.children[0].listeners.click({ preventDefault() {} });
-			assert.equal(p.get('goal-view').hidden, false);
+			reference.children[0].listeners.click({ preventDefault() {}, currentTarget: reference.children[0] });
+			assert.equal(p.get('goal-view').hidden, true);
+			assert.equal(p.get('test-view').hidden, false);
+			assert.equal(p.get('file-picker').hidden, false);
+			assert.equal(p.get('picker-files').children.length, context.sources.length);
+			if ('diff' in context) { assert.equal(p.get('picker-diff').textContent, context.diff); }
 			assert.equal(p.messages.length, requests);
 			p.click('nav-test');
 			assert.equal(p.get('test-view').hidden, false);
