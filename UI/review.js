@@ -423,8 +423,8 @@ function selectPreviewCode() {
 function renderFiles() {
 	const changes = context.changes;
 	const files = changes ?? context.sources.map(source => ({ name: source.name }));
-	byId('review-kind').textContent = changes ? 'Staged review' : 'Selected code';
-	byId('snapshot-kind').textContent = changes ? 'Staged snapshot' : 'Editor snapshot';
+	byId('review-kind').textContent = context.demo ? 'Demo review' : changes ? 'Staged review' : 'Selected code';
+	byId('snapshot-kind').textContent = context.demo ? 'Example commit' : changes ? 'Staged snapshot' : 'Editor snapshot';
 	const total = files.length + (files.length === 1 ? ' file' : ' files');
 	byId('totals').textContent = changes ? total + ' · +' + changes.reduce((sum, file) => sum + (file.added ?? 0), 0) + ' / −' + changes.reduce((sum, file) => sum + (file.deleted ?? 0), 0) + ' lines' + (changes.some(file => file.added === null) ? ' · binary files excluded from counts' : '') : total;
 	byId('sources').replaceChildren();
@@ -680,6 +680,7 @@ byId('retry').addEventListener('click', () => {
 	if (!context) { setBusy(true); vscode.postMessage({ type: 'init' }); }
 	else if (failed && lastTurn) send(lastTurn.text, lastTurn.kind);
 });
+byId('demo-examples').addEventListener('click', () => vscode.postMessage({ type: 'open-demo' }));
 window.addEventListener('message', event => {
 	const message = event.data;
 	if ((message.type === 'commit-approved' || message.type === 'commit-approval-error') && approvingCommit) {
@@ -691,6 +692,9 @@ window.addEventListener('message', event => {
 	}
 	if (message.type === 'context') {
 		context = message.context;
+		byId('demo-banner').hidden = !context.demo;
+		byId('demo-title').textContent = context.demo?.title ?? '';
+		byId('demo-description').textContent = context.demo?.description ?? '';
 		requireAllQuestions = message.requireAllQuestions === true;
 		byId('scope').textContent = context.label;
 		renderFiles();

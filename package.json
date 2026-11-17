@@ -49,6 +49,7 @@
 },
 
     "commands": [
+      { "command": "codetogether.demoMode", "title": "CodeTogether: Demo Mode" },
       { "command": "codetogether.settings", "title": "CodeTogether: Settings" },
       { "command": "codetogether.openReview", "title": "CodeTogether: Open Review" },
       { "command": "codetogether.explainChanges", "title": "CodeTogether: Understand This Change" },

@@ -43,16 +43,25 @@ const quiz_1 = require("./review/quiz");
 const assessment_1 = require("./prompts/assessment");
 const settings_1 = require("./commands/settings");
 const commitGate_1 = require("./git/commitGate");
+const examples_1 = require("./demo/examples");
 function activate(context) {
     (0, settings_1.registerSettingsCommand)(context);
     const snapshots = new Map();
     context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('codetogether-snapshot', {
         provideTextDocumentContent: uri => snapshots.get(uri.toString()) ?? ''
     }));
-    async function openReview(selectionMode = false, uri) {
+    async function chooseDemo() {
+        const selected = await vscode.window.showQuickPick(examples_1.demoExamples.map(example => ({
+            label: example.title, detail: example.description, description: 'Python', example
+        })), { title: 'CodeTogether: Demo Mode', placeHolder: 'Choose an example commit to review', matchOnDetail: true });
+        if (selected) {
+            await openReview(false, undefined, selected.example);
+        }
+    }
+    async function openReview(selectionMode = false, uri, demo) {
         const requireAllQuestions = () => vscode.workspace.getConfiguration('codetogether').get('requireAllQuizQuestions', false);
         let repositoryFolder;
-        if (!selectionMode && !uri && (vscode.workspace.workspaceFolders?.length ?? 0) > 1) {
+        if (!demo && !selectionMode && !uri && (vscode.workspace.workspaceFolders?.length ?? 0) > 1) {
             const selected = await vscode.window.showQuickPick(vscode.workspace.workspaceFolders.map(folder => ({
                 label: folder.name, description: folder.uri.fsPath, folder
             })), { title: 'Choose the repository to review all staged changes' });
@@ -70,6 +79,9 @@ function activate(context) {
         const document = selectionMode ? editor.document : undefined;
         const selection = selectionMode ? editor.selection : undefined;
         const capture = async () => {
+            if (demo) {
+                return (0, examples_1.loadDemoContext)(context.extensionUri.fsPath, demo);
+            }
             if (!document || !selection) {
                 return (0, context_1.getStagedContext)(uri, repositoryFolder);
             }
@@ -87,7 +99,7 @@ function activate(context) {
                 sources: [{ name: vscode.workspace.asRelativePath(document.uri), content, language: document.languageId, startLine: start + 1 }]
             };
         };
-        const panel = vscode.window.createWebviewPanel('codetogetherReview', 'CodeTogether', vscode.ViewColumn.Beside, {
+        const panel = vscode.window.createWebviewPanel('codetogetherReview', demo ? `CodeTogether Demo: ${demo.title}` : 'CodeTogether', vscode.ViewColumn.Beside, {
             enableScripts: true, retainContextWhenHidden: true,
             localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'UI')]
         });
@@ -101,6 +113,10 @@ function activate(context) {
             }
         });
         const listener = panel.webview.onDidReceiveMessage(async (message) => {
+            if (message?.type === 'open-demo') {
+                await chooseDemo();
+                return;
+            }
             if (message?.type === 'cancel') {
                 pending?.abort();
                 return;
@@ -113,6 +129,9 @@ function activate(context) {
                     snapshots.set(uri.toString(), source.content);
                     snapshotUris.push(uri.toString());
                     const snapshot = await vscode.workspace.openTextDocument(uri);
+                    if (source.language !== 'plaintext') {
+                        await vscode.languages.setTextDocumentLanguage(snapshot, source.language);
+                    }
                     const row = message.line - (source.startLine ?? 1);
                     const lastRow = (message.endLine ?? message.line) - (source.startLine ?? 1);
                     await vscode.window.showTextDocument(snapshot, {
@@ -129,6 +148,9 @@ function activate(context) {
                 const controller = new AbortController();
                 pending = controller;
                 try {
+                    if (demo) {
+                        throw new Error('Demo reviews cannot approve real commits.');
+                    }
                     if (!vscode.workspace.isTrusted) {
                         throw new Error('Trust this workspace before approving commits.');
                     }
@@ -243,5 +265,6 @@ function activate(context) {
         context.subscriptions.push(vscode.commands.registerCommand(id, (resource) => openReview(false, resource instanceof vscode.Uri ? resource : resource?.resourceUri)));
     }
     context.subscriptions.push(vscode.commands.registerCommand('codetogether.understandCode', () => openReview(true)));
+    context.subscriptions.push(vscode.commands.registerCommand('codetogether.demoMode', chooseDemo));
 }
 //# sourceMappingURL=extension.js.map

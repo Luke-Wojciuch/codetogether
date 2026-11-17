@@ -9,6 +9,7 @@ import { readReply } from '../models/stream';
 import { assessQuiz, parseQuiz, quizAssessmentFormat, quizFormat, requireQuizAnswers } from '../review/quiz';
 import { quizAssessmentInstructions } from '../prompts/assessment';
 import { approveStagedCommit } from '../git/commitGate';
+import { demoExamples, loadDemoContext } from '../demo/examples';
 
 const quizCode = { label: 'Selected request', sources: [{ name: 'retry.ts', content: 'const pending = request();\nreturn pending;', language: 'typescript', startLine: 10 }] };
 const quizPrompts = [
@@ -174,9 +175,11 @@ suite('Generated review quiz', () => {
 		let generatedQuestions = quizQuestions;
 		let receive = async (_message: object) => {};
 		const commands = new Map<string, () => Promise<void>>();
-		const posted: { type: string; questions?: unknown; text?: string; assessment?: unknown }[] = [];
+		const posted: { type: string; questions?: unknown; text?: string; assessment?: unknown; context?: import('../review/session').CodeContext }[] = [];
 		const requests: { messages: { content: string }[]; structured: boolean | object }[] = [];
-		class Uri { static joinPath() { return new Uri(); } }
+		let stagedReads = 0;
+		let chosenExample = 0;
+		class Uri { fsPath = resolve(__dirname, '../..'); static joinPath() { return new Uri(); } }
 		const api = {
 			Uri, ViewColumn: { Beside: 2 },
 			workspace: {
@@ -186,7 +189,7 @@ suite('Generated review quiz', () => {
 				registerTextDocumentContentProvider: () => ({}),
 				fs: { readFile: async () => new TextEncoder().encode('<html>{{nonce}}</html>') }
 			},
-			window: { createWebviewPanel: () => ({
+			window: { showQuickPick: async (items: unknown[]) => items[chosenExample], createWebviewPanel: () => ({
 				webview: { cspSource: 'vscode-webview:', asWebviewUri: () => 'resource',
 					onDidReceiveMessage: (handler: typeof receive) => { receive = handler; return {}; },
 					postMessage: async (message: typeof posted[number]) => { posted.push(message); } },
@@ -200,8 +203,9 @@ suite('Generated review quiz', () => {
 				if (name === 'vscode') { return api; }
 				if (name === './commands/settings') { return { registerSettingsCommand: () => {} }; }
 				if (name === './git/commitGate') { return { approveStagedCommit }; }
+				if (name === './demo/examples') { return { demoExamples, loadDemoContext }; }
 				if (name === 'node:crypto') { return { randomBytes: () => ({ toString: () => 'nonce' }) }; }
-				if (name === './git/context') { return { getStagedContext: async () => currentContext }; }
+				if (name === './git/context') { return { getStagedContext: async () => { stagedReads++; return currentContext; } }; }
 				if (name === './review/session') { return { Session }; }
 				if (name === './review/assessment') { return { assessIndependently }; }
 				if (name === './review/quiz') { return { assessQuiz, quizAssessmentFormat, quizFormat, requireQuizAnswers }; }
@@ -263,6 +267,30 @@ suite('Generated review quiz', () => {
 		assert.equal(requests.length, beforePartial + 1);
 		assert.equal(posted.at(-1)?.type, 'reply');
 		assert.match(posted.at(-1)?.text ?? '', /Not answered yet/);
+
+		// With no workspace folders, all demos still use the real tutor/quiz pipeline.
+		const readsBeforeDemo = stagedReads;
+		const requestsBeforeDemo = requests.length;
+		for (chosenExample = 0; chosenExample < demoExamples.length; chosenExample++) {
+			await commands.get('codetogether.demoMode')!();
+			await receive({ type: 'init' });
+			const demo = posted.at(-1)?.context;
+			assert.equal(demo?.demo?.title, demoExamples[chosenExample].title);
+			assert.equal(demo?.staged, undefined);
+			assert.ok(demo?.sources.every(source => source.language === 'python'));
+			assert.equal(requests.length, requestsBeforeDemo + chosenExample * 2);
+			await receive({ type: 'send', kind: 'goal', text: 'Explain this Python change.' });
+			assert.equal(requests.at(-1)?.messages.length, 3);
+			assert.ok(requests.at(-1)?.messages[1].content.includes(demo!.sources[0].content.split('\n')[0]));
+			await receive({ type: 'send', kind: 'quiz', text: 'Understand the change.' });
+			assert.equal(posted.at(-1)?.type, 'quiz');
+			await receive({ type: 'approve-commit', answers: '{}' });
+			assert.match(posted.at(-1)?.text ?? '', /Demo reviews cannot approve/);
+			// New review reloads the same example with no conversation history.
+			await receive({ type: 'init' });
+			assert.equal(posted.at(-1)?.context?.demo?.title, demo?.demo?.title);
+		}
+		assert.equal(stagedReads, readsBeforeDemo);
 
 	});
 	test('partial quizzes assess only supplied answers and preserve commit completion requirements', async () => {
@@ -523,6 +551,30 @@ function panel() {
 }
 
 suite('Discussion, test, and recap', () => {
+	test('demo reviews identify the example, browse Python, restart cleanly, and offer the example picker', async () => {
+		const p = panel();
+		const context = await loadDemoContext(resolve(__dirname, '../..'), demoExamples[0]);
+		p.emit({ type: 'context', context });
+		assert.equal(p.get('demo-banner').hidden, false);
+		assert.equal(p.get('demo-title').textContent, demoExamples[0].title);
+		assert.equal(p.get('review-kind').textContent, 'Demo review');
+		assert.equal(p.get('snapshot-kind').textContent, 'Example commit');
+		assert.equal(p.get('approve-commit').hidden, true);
+		p.begin(); p.emit({ type: 'reply', text: 'Let us trace the task search.' });
+		p.get('input').value = 'A draft about Python';
+		p.click('show-code');
+		p.get('picker-files').children[0].listeners.click({ preventDefault() {} });
+		assert.match(p.get('preview-title').textContent, /task_list.py/);
+		assert.equal(p.get('input').value, 'A draft about Python');
+		p.click('restart');
+		assert.equal(p.messages.at(-1)?.type, 'init');
+		p.emit({ type: 'context', context });
+		assert.equal(p.get('goal-input').value, '');
+		assert.equal(p.get('thread').children.length, 0);
+		assert.equal(p.get('demo-banner').hidden, false);
+		p.click('demo-examples');
+		assert.equal(p.messages.at(-1)?.type, 'open-demo');
+	});
 	test('one typed answer submits with other fields blank and partial results cannot approve a commit', () => {
 		const p = panel(); p.emit({ type: 'context', context: { ...quizCode, staged: { allStaged: true } } });
 		p.begin(); p.emit({ type: 'reply', text: 'Ready.' }); p.generateQuiz();

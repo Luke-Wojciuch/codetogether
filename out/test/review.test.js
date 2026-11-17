@@ -44,6 +44,7 @@ const stream_1 = require("../models/stream");
 const quiz_1 = require("../review/quiz");
 const assessment_2 = require("../prompts/assessment");
 const commitGate_1 = require("../git/commitGate");
+const examples_1 = require("../demo/examples");
 const quizCode = { label: 'Selected request', sources: [{ name: 'retry.ts', content: 'const pending = request();\nreturn pending;', language: 'typescript', startLine: 10 }] };
 const quizPrompts = [
     'Why does this code return pending instead of starting a second request?',
@@ -209,7 +210,10 @@ const reply = 'The retry can repeat a write. [[1:10-11]]\n<review-state>' + JSON
         const commands = new Map();
         const posted = [];
         const requests = [];
+        let stagedReads = 0;
+        let chosenExample = 0;
         class Uri {
+            fsPath = (0, node_path_1.resolve)(__dirname, '../..');
             static joinPath() { return new Uri(); }
         }
         const api = {
@@ -221,7 +225,7 @@ const reply = 'The retry can repeat a write. [[1:10-11]]\n<review-state>' + JSON
                 registerTextDocumentContentProvider: () => ({}),
                 fs: { readFile: async () => new TextEncoder().encode('<html>{{nonce}}</html>') }
             },
-            window: { createWebviewPanel: () => ({
+            window: { showQuickPick: async (items) => items[chosenExample], createWebviewPanel: () => ({
                     webview: { cspSource: 'vscode-webview:', asWebviewUri: () => 'resource',
                         onDidReceiveMessage: (handler) => { receive = handler; return {}; },
                         postMessage: async (message) => { posted.push(message); } },
@@ -241,11 +245,14 @@ const reply = 'The retry can repeat a write. [[1:10-11]]\n<review-state>' + JSON
                 if (name === './git/commitGate') {
                     return { approveStagedCommit: commitGate_1.approveStagedCommit };
                 }
+                if (name === './demo/examples') {
+                    return { demoExamples: examples_1.demoExamples, loadDemoContext: examples_1.loadDemoContext };
+                }
                 if (name === 'node:crypto') {
                     return { randomBytes: () => ({ toString: () => 'nonce' }) };
                 }
                 if (name === './git/context') {
-                    return { getStagedContext: async () => currentContext };
+                    return { getStagedContext: async () => { stagedReads++; return currentContext; } };
                 }
                 if (name === './review/session') {
                     return { Session: session_1.Session };
@@ -320,6 +327,29 @@ const reply = 'The retry can repeat a write. [[1:10-11]]\n<review-state>' + JSON
         assert.equal(requests.length, beforePartial + 1);
         assert.equal(posted.at(-1)?.type, 'reply');
         assert.match(posted.at(-1)?.text ?? '', /Not answered yet/);
+        // With no workspace folders, all demos still use the real tutor/quiz pipeline.
+        const readsBeforeDemo = stagedReads;
+        const requestsBeforeDemo = requests.length;
+        for (chosenExample = 0; chosenExample < examples_1.demoExamples.length; chosenExample++) {
+            await commands.get('codetogether.demoMode')();
+            await receive({ type: 'init' });
+            const demo = posted.at(-1)?.context;
+            assert.equal(demo?.demo?.title, examples_1.demoExamples[chosenExample].title);
+            assert.equal(demo?.staged, undefined);
+            assert.ok(demo?.sources.every(source => source.language === 'python'));
+            assert.equal(requests.length, requestsBeforeDemo + chosenExample * 2);
+            await receive({ type: 'send', kind: 'goal', text: 'Explain this Python change.' });
+            assert.equal(requests.at(-1)?.messages.length, 3);
+            assert.ok(requests.at(-1)?.messages[1].content.includes(demo.sources[0].content.split('\n')[0]));
+            await receive({ type: 'send', kind: 'quiz', text: 'Understand the change.' });
+            assert.equal(posted.at(-1)?.type, 'quiz');
+            await receive({ type: 'approve-commit', answers: '{}' });
+            assert.match(posted.at(-1)?.text ?? '', /Demo reviews cannot approve/);
+            // New review reloads the same example with no conversation history.
+            await receive({ type: 'init' });
+            assert.equal(posted.at(-1)?.context?.demo?.title, demo?.demo?.title);
+        }
+        assert.equal(stagedReads, readsBeforeDemo);
     });
     (0, node_test_1.test)('partial quizzes assess only supplied answers and preserve commit completion requirements', async () => {
         const session = new session_1.Session(quizCode);
@@ -586,6 +616,31 @@ function panel() {
     return { get, emit, click, load, begin, generateQuiz, fillQuiz, messages, sandbox, tick: () => waiting?.() };
 }
 (0, node_test_1.suite)('Discussion, test, and recap', () => {
+    (0, node_test_1.test)('demo reviews identify the example, browse Python, restart cleanly, and offer the example picker', async () => {
+        const p = panel();
+        const context = await (0, examples_1.loadDemoContext)((0, node_path_1.resolve)(__dirname, '../..'), examples_1.demoExamples[0]);
+        p.emit({ type: 'context', context });
+        assert.equal(p.get('demo-banner').hidden, false);
+        assert.equal(p.get('demo-title').textContent, examples_1.demoExamples[0].title);
+        assert.equal(p.get('review-kind').textContent, 'Demo review');
+        assert.equal(p.get('snapshot-kind').textContent, 'Example commit');
+        assert.equal(p.get('approve-commit').hidden, true);
+        p.begin();
+        p.emit({ type: 'reply', text: 'Let us trace the task search.' });
+        p.get('input').value = 'A draft about Python';
+        p.click('show-code');
+        p.get('picker-files').children[0].listeners.click({ preventDefault() { } });
+        assert.match(p.get('preview-title').textContent, /task_list.py/);
+        assert.equal(p.get('input').value, 'A draft about Python');
+        p.click('restart');
+        assert.equal(p.messages.at(-1)?.type, 'init');
+        p.emit({ type: 'context', context });
+        assert.equal(p.get('goal-input').value, '');
+        assert.equal(p.get('thread').children.length, 0);
+        assert.equal(p.get('demo-banner').hidden, false);
+        p.click('demo-examples');
+        assert.equal(p.messages.at(-1)?.type, 'open-demo');
+    });
     (0, node_test_1.test)('one typed answer submits with other fields blank and partial results cannot approve a commit', () => {
         const p = panel();
         p.emit({ type: 'context', context: { ...quizCode, staged: { allStaged: true } } });

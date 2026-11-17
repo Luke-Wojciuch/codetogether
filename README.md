@@ -18,6 +18,26 @@ The walkthrough opens beside the editor with per-file added/deleted line counts 
 
 Use **Show code** on a file to browse its supplied contents. **Browse files** opens a file picker within the current tutor or quiz screen, preserving your draft and answers. **Show code** opens the last viewed code or the single supplied file directly; when multiple files are available, it opens the picker. Diff-only scopes show the supplied diff in the picker. References in answers open an inline preview beside that response, and quiz references open beside their question, with cited lines highlighted and surrounding context. Closing the preview returns focus to its opening control; Escape also closes it. Drag to highlight your own code selection; the touched lines stay highlighted when you use the actions. **Open in editor** selects those lines in a read-only snapshot; **Ask about this code** adds a question about those lines to your draft without sending it. The scope and staged diff are available in a disclosure.
 
+## Demo mode
+
+Run **CodeTogether: Demo Mode** from the Command Palette, or click **Demo examples** in any review panel. Choose a bundled Python example:
+
+- **Add search and filters to a task list:** search task titles and optionally keep only incomplete tasks.
+- **Add discounts and delivery to a checkout total:** calculate item totals with discount and delivery rules, using whole cents.
+- **Add retries and dependencies to a job scheduler (Hard):** trace simulated background jobs through worker limits, dependency chains, failures, and delayed retries. This longer example requires following state and event ordering across multiple jobs; it uses only the Python standard library.
+
+Selecting an example opens a fresh review with its commit diff, complete Python file, and readable unit tests. Use **Show code**, set your goal, then start the tutor or review quiz as usual. The banner identifies the example throughout the session. **New review** clears the conversation and quiz and reloads the same example; **Demo examples** lets you choose another example in a separate panel.
+
+Demo mode works without an open folder, Git repository, staged changes, or Python installation. It reviews the bundled code rather than executing Python. Configure your model through **CodeTogether: Settings** first; tutor responses, quiz questions, and feedback use the normal model provider and are not scripted. Loading an example does not call the model. Demo reviews cannot approve real commits or change workspace files.
+
+The example files live in `demos/task-list`, `demos/checkout`, and `demos/job-scheduler`, with `before` and `after` snapshots. To run the sample tests yourself with Python 3:
+
+```sh
+python -B -m unittest discover -s demos/task-list/after -v
+python -B -m unittest discover -s demos/checkout/after -v
+python -B -m unittest discover -s demos/job-scheduler/after -v
+```
+
 ## Optional Git commit blocker
 
 The gate is opt-in and is not installed automatically. To try it after compiling/restarting the extension:

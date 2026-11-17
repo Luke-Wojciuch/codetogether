@@ -38,11 +38,34 @@ const node_test_1 = require("node:test");
 const session_1 = require("../review/session");
 const stream_1 = require("../models/stream");
 const changes_1 = require("../git/changes");
+const node_path_1 = require("node:path");
+const examples_1 = require("../demo/examples");
 const code = {
     label: 'Selected code', sources: [{
             name: 'retry.ts', content: 'const pending = request();\nreturn pending;', language: 'typescript', startLine: 10
         }]
 };
+(0, node_test_1.suite)('Bundled Python demos', () => {
+    (0, node_test_1.test)('each commit supplies complete Python sources, a consistent diff, and no staged identity', async () => {
+        for (const example of examples_1.demoExamples) {
+            const context = await (0, examples_1.loadDemoContext)((0, node_path_1.resolve)(__dirname, '../..'), example);
+            assert.equal(context.demo?.title, example.title);
+            assert.equal(context.staged, undefined);
+            assert.equal(context.sources.length, 2);
+            for (const source of context.sources) {
+                assert.equal(source.language, 'python');
+                assert.ok(context.diff?.includes(`+++ b/${source.name}`));
+                const addedLines = context.diff.split(`+++ b/${source.name}\n`)[1].split('diff --git')[0]
+                    .split('\n').filter(line => line.startsWith('+')).map(line => line.slice(1));
+                assert.equal(addedLines.join('\n') + '\n', source.content);
+            }
+            const session = new session_1.Session(context);
+            assert.ok(session.messages('Explain.')[1].content.includes(context.sources[0].content.split('\n')[0]));
+            assert.equal(session.reference(1, 1)?.name, example.file);
+            assert.equal(session.reference(2, 1)?.name, example.test);
+        }
+    });
+});
 function streamedResponse(text, byteByByte = false) {
     const bytes = new TextEncoder().encode(text);
     return new ReadableStream({

@@ -7,7 +7,7 @@ import type { StagedSnapshot } from '../git/client';
 export interface Message { role: 'system' | 'user' | 'assistant'; content: string }
 export interface Source { name: string; content: string; language: string; startLine?: number }
 export interface FileChange { name: string; added: number | null; deleted: number | null }
-export interface CodeContext { label: string; diff?: string; sources: Source[]; changes?: FileChange[]; staged?: StagedSnapshot }
+export interface CodeContext { label: string; diff?: string; sources: Source[]; changes?: FileChange[]; staged?: StagedSnapshot; demo?: { title: string; description: string } }
 
 
 export class Session {

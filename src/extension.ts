@@ -8,6 +8,7 @@ import { assessQuiz, quizAssessmentFormat, quizFormat, requireQuizAnswers } from
 import { quizAssessmentInstructions } from './prompts/assessment';
 import { registerSettingsCommand } from './commands/settings';
 import { approveStagedCommit } from './git/commitGate';
+import { demoExamples, DemoExample, loadDemoContext } from './demo/examples';
 
 export function activate(context: vscode.ExtensionContext) {
 	registerSettingsCommand(context);
@@ -15,10 +16,16 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('codetogether-snapshot', {
 		provideTextDocumentContent: uri => snapshots.get(uri.toString()) ?? ''
 	}));
-	async function openReview(selectionMode = false, uri?: vscode.Uri) {
+	async function chooseDemo() {
+		const selected = await vscode.window.showQuickPick(demoExamples.map(example => ({
+			label: example.title, detail: example.description, description: 'Python', example
+		})), { title: 'CodeTogether: Demo Mode', placeHolder: 'Choose an example commit to review', matchOnDetail: true });
+		if (selected) { await openReview(false, undefined, selected.example); }
+	}
+	async function openReview(selectionMode = false, uri?: vscode.Uri, demo?: DemoExample) {
 		const requireAllQuestions = () => vscode.workspace.getConfiguration('codetogether').get<boolean>('requireAllQuizQuestions', false);
 		let repositoryFolder: vscode.Uri | undefined;
-		if (!selectionMode && !uri && (vscode.workspace.workspaceFolders?.length ?? 0) > 1) {
+		if (!demo && !selectionMode && !uri && (vscode.workspace.workspaceFolders?.length ?? 0) > 1) {
 			const selected = await vscode.window.showQuickPick(vscode.workspace.workspaceFolders!.map(folder => ({
 				label: folder.name, description: folder.uri.fsPath, folder
 			})), { title: 'Choose the repository to review all staged changes' });
@@ -34,6 +41,7 @@ export function activate(context: vscode.ExtensionContext) {
 		const document = selectionMode ? editor!.document : undefined;
 		const selection = selectionMode ? editor!.selection : undefined;
 		const capture = async (): Promise<CodeContext> => {
+			if (demo) { return loadDemoContext(context.extensionUri.fsPath, demo); }
 			if (!document || !selection) {
 				return getStagedContext(uri, repositoryFolder);
 			}
@@ -51,7 +59,7 @@ export function activate(context: vscode.ExtensionContext) {
 				sources: [{ name: vscode.workspace.asRelativePath(document.uri), content, language: document.languageId, startLine: start + 1 }]
 			};
 		};
-		const panel = vscode.window.createWebviewPanel('codetogetherReview', 'CodeTogether', vscode.ViewColumn.Beside, {
+		const panel = vscode.window.createWebviewPanel('codetogetherReview', demo ? `CodeTogether Demo: ${demo.title}` : 'CodeTogether', vscode.ViewColumn.Beside, {
 			enableScripts: true, retainContextWhenHidden: true,
 			localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'UI')]
 		});
@@ -65,6 +73,10 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		});
 		const listener = panel.webview.onDidReceiveMessage(async message => {
+			if (message?.type === 'open-demo') {
+				await chooseDemo();
+				return;
+			}
 			if (message?.type === 'cancel') {
 				pending?.abort();
 				return;
@@ -77,6 +89,9 @@ export function activate(context: vscode.ExtensionContext) {
 					snapshots.set(uri.toString(), source.content);
 					snapshotUris.push(uri.toString());
 					const snapshot = await vscode.workspace.openTextDocument(uri);
+					if (source.language !== 'plaintext') {
+						await vscode.languages.setTextDocumentLanguage(snapshot, source.language);
+					}
 					const row = message.line - (source.startLine ?? 1);
 					const lastRow = (message.endLine ?? message.line) - (source.startLine ?? 1);
 					await vscode.window.showTextDocument(snapshot, {
@@ -93,6 +108,7 @@ export function activate(context: vscode.ExtensionContext) {
 				const controller = new AbortController();
 				pending = controller;
 				try {
+					if (demo) { throw new Error('Demo reviews cannot approve real commits.'); }
 					if (!vscode.workspace.isTrusted) { throw new Error('Trust this workspace before approving commits.'); }
 					if (!session || typeof message.answers !== 'string') { throw new Error('Load and submit a review quiz first.'); }
 					await approveStagedCommit(session, message.answers, controller.signal, requireAllQuestions());
@@ -191,4 +207,5 @@ export function activate(context: vscode.ExtensionContext) {
 			openReview(false, resource instanceof vscode.Uri ? resource : resource?.resourceUri)));
 	}
 	context.subscriptions.push(vscode.commands.registerCommand('codetogether.understandCode', () => openReview(true)));
+	context.subscriptions.push(vscode.commands.registerCommand('codetogether.demoMode', chooseDemo));
 }

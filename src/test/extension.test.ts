@@ -3,12 +3,36 @@ import { suite, test } from 'node:test';
 import { Session, CodeContext } from '../review/session';
 import { readReply } from '../models/stream';
 import { parseNumstat } from '../git/changes';
+import { resolve } from 'node:path';
+import { demoExamples, loadDemoContext } from '../demo/examples';
 
 const code: CodeContext = {
 	label: 'Selected code', sources: [{
 		name: 'retry.ts', content: 'const pending = request();\nreturn pending;', language: 'typescript', startLine: 10
 	}]
 };
+
+suite('Bundled Python demos', () => {
+	test('each commit supplies complete Python sources, a consistent diff, and no staged identity', async () => {
+		for (const example of demoExamples) {
+			const context = await loadDemoContext(resolve(__dirname, '../..'), example);
+			assert.equal(context.demo?.title, example.title);
+			assert.equal(context.staged, undefined);
+			assert.equal(context.sources.length, 2);
+			for (const source of context.sources) {
+				assert.equal(source.language, 'python');
+				assert.ok(context.diff?.includes(`+++ b/${source.name}`));
+				const addedLines = context.diff!.split(`+++ b/${source.name}\n`)[1].split('diff --git')[0]
+					.split('\n').filter(line => line.startsWith('+')).map(line => line.slice(1));
+				assert.equal(addedLines.join('\n') + '\n', source.content);
+			}
+			const session = new Session(context);
+			assert.ok(session.messages('Explain.')[1].content.includes(context.sources[0].content.split('\n')[0]));
+			assert.equal(session.reference(1, 1)?.name, example.file);
+			assert.equal(session.reference(2, 1)?.name, example.test);
+		}
+	});
+});
 
 function streamedResponse(text: string, byteByByte = false): NonNullable<Response['body']> {
 	const bytes = new TextEncoder().encode(text);
